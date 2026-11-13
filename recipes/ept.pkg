@@ -1,0 +1,4 @@
+# ept itself so that `ept upgrade` can update the package tool
+GIT=https://github.com/sammothxc/ept.git
+BUILD="make"
+FILES="ept:/bin/ept"

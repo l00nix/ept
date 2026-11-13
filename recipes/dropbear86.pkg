@@ -1,0 +1,4 @@
+# dropbear86: SSH client for ELKS
+GIT=https://github.com/sammothxc/dropbear86.git
+BUILD="make -f Makefile.elks"
+FILES="ssh:/bin/ssh"
