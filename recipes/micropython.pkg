@@ -4,4 +4,4 @@ GIT=https://github.com/sammothxc/micropython.git
 BRANCH=elks-port
 STABLE=no
 BUILD="make -C ports/elks"
-FILES="ports/elks/build/micropython:/bin/micropython"
+FILES="ports/elks/build/micropython:/bin/upython"
