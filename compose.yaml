@@ -1,3 +1,7 @@
+# docker compose exec builder ept-build once         # check everything now
+# docker compose exec builder ept-build once <name>  # force a rebuild of one package
+# docker compose exec builder cat /work/log/<name>.log
+
 services:
   web:
     image: nginx:alpine
