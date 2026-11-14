@@ -10,6 +10,7 @@
 #   BUILD   command that builds it, run in the checkout
 #   FILES   "built-file:/install/path ..." pairs
 #   BRANCH  (optional) branch nightlies are built from, default: remote HEAD
+#   STABLE  (optional) set to "no" to publish nightlies only and ignore tags
 #
 # Recipes are read from /recipes, or, when RECIPES_GIT is set, from that git
 # repository (subdirectory RECIPES_SUBDIR), which is pulled before every cycle.
@@ -56,6 +57,16 @@ update_elks()
 			log "ERROR: ELKS libc build failed, see $WORK/elks-libc.log"
 			tail -20 "$WORK/elks-libc.log" | cut -c1-200
 			return 1
+		}
+	fi
+	# Open Watcom large-model libc (libcl.lib), for packages built with owcc.
+	# A failure here only affects those packages, so it is not fatal.
+	if [ -x "$WATCOM/binl64/owcc" ] && { [ "$old" != "$new" ] || [ ! -f "$ELKS/libc/libcl.lib" ]; }; then
+		log "building ELKS libc for Open Watcom"
+		(cd "$ELKS/libc" && PATH=$WATCOM/binl64:$PATH make -s -f watcom.mk MODEL=l) \
+			> "$WORK/elks-owlibc.log" 2>&1 || {
+			log "ERROR: Open Watcom libc build failed, see $WORK/elks-owlibc.log"
+			tail -20 "$WORK/elks-owlibc.log" | cut -c1-200
 		}
 	fi
 	# Replace the libc bundled with the toolchain package by the one just
@@ -114,7 +125,7 @@ build_recipe()
 {
 	local recipe=$1 force=$2 name src tag head version
 	name=$(basename "$recipe" .pkg)
-	GIT= BUILD= FILES= BRANCH=
+	GIT= BUILD= FILES= BRANCH= STABLE=
 	. "$recipe"
 	if [ -z "$GIT" ] || [ -z "$BUILD" ] || [ -z "$FILES" ]; then
 		log "ERROR: $recipe must set GIT, BUILD and FILES"
@@ -129,7 +140,9 @@ build_recipe()
 
 	# stable: newest tag
 	tag=$(git -C "$src" tag --sort=-v:refname | head -1)
-	if [ -n "$tag" ]; then
+	if [ "$STABLE" = no ]; then
+		:
+	elif [ -n "$tag" ]; then
 		version=${tag#v}
 		if [ -n "$force" ] || [ "$(cat "$REPO/pool/$name/VERSION" 2>/dev/null)" != "$version" ]; then
 			build_one "$name" "$tag" "$version" "$REPO"

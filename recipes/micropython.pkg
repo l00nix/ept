@@ -1,0 +1,7 @@
+# MicroPython for ELKS: built with Open Watcom (large model), nightly only.
+# Needs a kernel with CONFIG_EXEC_OS2=y.
+GIT=https://github.com/sammothxc/micropython.git
+BRANCH=elks-port
+STABLE=no
+BUILD="make -C ports/elks"
+FILES="ports/elks/build/micropython:/bin/micropython"
