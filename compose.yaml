@@ -20,9 +20,9 @@ services:
       dockerfile: server/Dockerfile
     restart: unless-stopped
     environment:
-      INTERVAL: "86400"
-      RECIPES_GIT: "https://github.com/sammothxc/ept.git"
-      RECIPES_SUBDIR: "recipes"
+      INTERVAL: 86400
+      RECIPES_GIT: https://github.com/sammothxc/ept.git
+      RECIPES_SUBDIR: recipes
     volumes:
       - repo:/repo
       - work:/work
@@ -33,5 +33,5 @@ networks:
     external: true
 
 volumes:
-  repo:
-  work:
+  repo: null
+  work: null
