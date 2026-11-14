@@ -138,8 +138,8 @@ build_recipe()
 		git -C "$src" fetch -q --tags --prune origin || { log "ERROR: $name: fetch failed"; return 1; }
 	fi
 
-	# stable: newest tag
-	tag=$(git -C "$src" tag --sort=-v:refname | head -1)
+	# stable: newest tag (versionsort.suffix makes v0.3 newer than v0.3-dev1)
+	tag=$(git -C "$src" -c versionsort.suffix=- tag --sort=-v:refname | head -1)
 	if [ "$STABLE" = no ]; then
 		:
 	elif [ -n "$tag" ]; then

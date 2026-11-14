@@ -1,0 +1,6 @@
+# elksweb: graphical web browser for ELKS
+GIT=https://github.com/l00nix/ELKSWeb.git
+BUILD="ELKSWEB_ELKS=$ELKS sh toolchain/build-external.sh"
+FILES="build/elksweb:/bin/elksweb
+share/welcome.htm:/lib/elksweb/welcome.htm
+share/elksweb.gif:/lib/elksweb/elksweb.gif"
