@@ -28,6 +28,7 @@ services:
 
 networks:
   ept-edge:
+    external: true
 
 volumes:
   repo:
