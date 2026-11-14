@@ -10,7 +10,7 @@ services:
     networks:
       - ept-edge
     volumes:
-      - repo:/usr/share/nginx/html:ro
+      - repo:/repo:ro       # not nginx's html folder: Docker would copy its welcome page into the volume
       - ./server/nginx.conf:/etc/nginx/conf.d/default.conf:ro
 
   ept-builder:
