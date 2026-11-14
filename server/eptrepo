@@ -1,0 +1,95 @@
+#!/bin/sh
+# eptrepo - maintain an ept package repository (runs on the host, not on ELKS)
+#
+# Repository layout:
+#   <repo>/index                    generated package list
+#   <repo>/pool/<name>/VERSION      package version, one word
+#   <repo>/pool/<name>/<dest>       each file, at its install path
+#                                   e.g. pool/lua/bin/lua -> /bin/lua
+# Nightly builds use a second repository of the same layout in <repo>/nightly.
+#
+# Usage:
+#   eptrepo add <repo> <name> <version> <file> <dest> [<file> <dest> ...]
+#   eptrepo index <repo>
+
+set -e
+
+usage()
+{
+	sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'
+	exit 1
+}
+
+die()
+{
+	echo "eptrepo: $*" >&2
+	exit 1
+}
+
+checkword()
+{
+	case "$1" in
+	""|*[!A-Za-z0-9._/+-]*) die "'$1': only letters, digits and . _ + - allowed";;
+	esac
+}
+
+index()
+{
+	repo=$1
+	[ -d "$repo/pool" ] || die "$repo/pool: no such directory"
+	out=$repo/index.tmp
+	echo "#ept1" > "$out"
+	npkg=0
+	nfile=0
+	for dir in "$repo"/pool/*/; do
+		[ -d "$dir" ] || continue
+		name=`basename "$dir"`
+		checkword "$name"
+		[ -f "$dir/VERSION" ] || die "$name: missing VERSION file"
+		version=`cat "$dir/VERSION"`
+		checkword "$version"
+		files=`cd "$dir" && find . -type f ! -path ./VERSION | LC_ALL=C sort`
+		[ "$files" ] || die "$name: package has no files"
+		for f in $files; do
+			dest=${f#.}
+			checkword "$dest"
+			sum=`md5sum "$dir/$f" | cut -d' ' -f1`
+			size=`wc -c < "$dir/$f" | tr -d ' '`
+			[ "$size" -gt 0 ] || die "$name: $dest is empty"
+			if [ -x "$dir/$f" ]; then mode=755; else mode=644; fi
+			echo "$name $version $sum $size $mode $dest" >> "$out"
+			nfile=`expr $nfile + 1`
+		done
+		npkg=`expr $npkg + 1`
+	done
+	echo "#end" >> "$out"
+	mv "$out" "$repo/index"
+	echo "$repo/index: $npkg packages, $nfile files"
+}
+
+add()
+{
+	[ $# -ge 5 ] || usage
+	repo=$1 name=$2 version=$3
+	shift 3
+	checkword "$name"
+	checkword "$version"
+	rm -rf "$repo/pool/$name"
+	mkdir -p "$repo/pool/$name"
+	echo "$version" > "$repo/pool/$name/VERSION"
+	while [ $# -ge 2 ]; do
+		case "$2" in /*) ;; *) die "$2: destination must be an absolute path";; esac
+		checkword "$2"
+		mkdir -p "$repo/pool/$name`dirname "$2"`"
+		cp -p "$1" "$repo/pool/$name$2"
+		shift 2
+	done
+	[ $# -eq 0 ] || usage
+	index "$repo"
+}
+
+case "$1" in
+add)	shift; add "$@";;
+index)	[ $# -eq 2 ] || usage; index "$2";;
+*)	usage;;
+esac
