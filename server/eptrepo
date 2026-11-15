@@ -37,7 +37,7 @@ index()
 {
 	repo=$1
 	[ -d "$repo/pool" ] || die "$repo/pool: no such directory"
-	out=$repo/index.tmp
+	out=$repo/.index.$$		# unique, so concurrent runs cannot clobber each other
 	echo "#ept1" > "$out"
 	npkg=0
 	nfile=0

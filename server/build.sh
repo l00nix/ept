@@ -177,10 +177,22 @@ build_all()
 	eptrepo index "$REPO/nightly" > /dev/null
 }
 
+# Run one build cycle while holding $WORK/build.lock. The container's own
+# "loop" and a manual "exec ... once" would otherwise run at the same time,
+# racing on git checkouts and on the repository files.
+locked()
+{
+	mkdir -p "$WORK"
+	(
+		flock -n 9 || { log "another build is running, waiting for it"; flock 9; }
+		"$@"
+	) 9> "$WORK/build.lock"
+}
+
 case "$1" in
-once)	build_all "$2";;
+once)	locked build_all "$2";;
 loop)	while :; do
-		build_all
+		locked build_all
 		log "sleeping $INTERVAL seconds"
 		sleep "$INTERVAL"
 	done;;
