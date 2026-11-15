@@ -174,14 +174,46 @@ error:
 }
 
 /*
+ * Redraw the download meter in place: a bar when the size is known,
+ * otherwise a running KB count. Returns what was drawn, so callers
+ * only write again when it changes (the ELKS console is slow).
+ */
+static int meter(long got, long size, int last)
+{
+    char buf[40];
+    int v, i, n;
+
+    if (size > 0) {
+        if (got > size)
+            got = size;
+        v = (int)(got * 100 / size);
+        if (v == last)
+            return last;
+        strcpy(buf, "\r  [");
+        for (i = 0; i < 20; i++)
+            buf[4 + i] = i < v / 5 ? '#' : '.';
+        n = 24 + sprintf(buf + 24, "] %3d%%", v);
+    } else {
+        v = (int)(got >> 10);
+        if (v == last)
+            return last;
+        n = sprintf(buf, "\r  %dK", v);
+    }
+    write(STDOUT_FILENO, buf, n);
+    return v;
+}
+
+/*
  * GET <repo><rpath> into outfile. On success returns 0 and sets *size and the
  * hex md5 of the body. Anything but a complete HTTP 200 reply is an error.
  * Returns -2 when the server went quiet, which is worth another attempt.
+ * expect is the size from the index, for the progress bar; 0 if unknown.
  */
-static int http_try(const char *rpath, const char *outfile, char *hexsum, long *size)
+static int http_try(const char *rpath, const char *outfile, char *hexsum, long *size,
+    long expect)
 {
-    int fd, out, n, i, hdr = 1, nl = 0, slen = 0, rc = -1;
-    long total = 0, dots = 0;
+    int fd, out, n, i, hdr = 1, nl = 0, slen = 0, rc = -1, shown = -1;
+    long total = 0;
     char status[13];
     unsigned char digest[16];
     md5_t ctx;
@@ -191,6 +223,7 @@ static int http_try(const char *rpath, const char *outfile, char *hexsum, long *
         fprintf(stderr, "ept: URL too long\n");
         return -1;
     }
+    fflush(stdout);                     /* meter uses write(); keep it in order */
     fd = net_connect();
     if (fd < 0) {
         fprintf(stderr, "ept: cannot connect to %s port %d (is the network up?)\n",
@@ -224,7 +257,7 @@ static int http_try(const char *rpath, const char *outfile, char *hexsum, long *
         tv.tv_sec = STALL;
         tv.tv_usec = 0;
         if (select(fd + 1, &rfds, NULL, NULL, &tv) == 0) {
-            if (dots)
+            if (shown >= 0)
                 write(STDOUT_FILENO, "\n", 1);
             fprintf(stderr, "ept: no data from server for %d seconds\n", STALL);
             rc = -2;
@@ -264,13 +297,11 @@ static int http_try(const char *rpath, const char *outfile, char *hexsum, long *
             }
             md5_update(&ctx, readbuf + i, n - i);
             total += n - i;
-            while (total - dots >= 8192) {      /* progress for slow machines */
-                write(STDOUT_FILENO, ".", 1);
-                dots += 8192;
-            }
+            if (expect > 0 || total >= 8192)    /* progress for slow machines */
+                shown = meter(total, expect, shown);
         }
     }
-    if (dots)
+    if (shown >= 0)
         write(STDOUT_FILENO, "\n", 1);
     if (n < 0)
         fprintf(stderr, "ept: read error from server\n");
@@ -294,12 +325,13 @@ done:
 }
 
 /* http_try, started again on a new connection when a transfer stalls */
-static int http_get(const char *rpath, const char *outfile, char *hexsum, long *size)
+static int http_get(const char *rpath, const char *outfile, char *hexsum, long *size,
+    long expect)
 {
     int rc, try;
 
     for (try = 1; ; try++) {
-        rc = http_try(rpath, outfile, hexsum, size);
+        rc = http_try(rpath, outfile, hexsum, size, expect);
         if (rc != -2 || try == TRIES)
             return rc;
         fprintf(stderr, "ept: trying again (%d of %d)\n", try + 1, TRIES);
@@ -428,7 +460,7 @@ static int update(int c)
         printf("Fetching http://%s%s%s\n", host, base, sline);
     else
         printf("Fetching http://%s:%d%s%s\n", host, port, base, sline);
-    if (http_get(sline, IDXNEW, sum, &size) != 0)
+    if (http_get(sline, IDXNEW, sum, &size, 0) != 0)
         return 1;
     if ((fp = fopen(IDXNEW, "r")) == NULL) {
         perror(IDXNEW);
@@ -491,7 +523,7 @@ static int getfile(char **f)
 
     /* sline is free here: nested lookups are done before getfile is called */
     sprintf(sline, "%s/pool/%s%s", CHANDIR, name, dest);
-    if (http_get(sline, tmp, got, &size) != 0)
+    if (http_get(sline, tmp, got, &size, atol(f[3])) != 0)
         return 1;
     if (size != atol(f[3]) || strcmp(got, sum) != 0) {
         unlink(tmp);
