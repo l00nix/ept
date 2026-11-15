@@ -17,6 +17,8 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/stat.h>
+#include <sys/select.h>
+#include <sys/time.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
@@ -35,6 +37,8 @@
 #define DBNEW       DIR "/inst.new"
 
 #define LINESZ      256
+#define STALL       10          /* seconds without data before a download is retried */
+#define TRIES       3
 #define NIDX        6           /* fields per index line */
 #define NDB         5           /* fields per installed line */
 
@@ -172,8 +176,9 @@ error:
 /*
  * GET <repo><rpath> into outfile. On success returns 0 and sets *size and the
  * hex md5 of the body. Anything but a complete HTTP 200 reply is an error.
+ * Returns -2 when the server went quiet, which is worth another attempt.
  */
-static int http_get(const char *rpath, const char *outfile, char *hexsum, long *size)
+static int http_try(const char *rpath, const char *outfile, char *hexsum, long *size)
 {
     int fd, out, n, i, hdr = 1, nl = 0, slen = 0, rc = -1;
     long total = 0, dots = 0;
@@ -210,7 +215,24 @@ static int http_get(const char *rpath, const char *outfile, char *hexsum, long *
         return -1;
     }
     md5_init(&ctx);
-    while ((n = read(fd, readbuf, sizeof(readbuf))) > 0) {
+    for (;;) {
+        fd_set rfds;
+        struct timeval tv;
+
+        FD_ZERO(&rfds);
+        FD_SET(fd, &rfds);
+        tv.tv_sec = STALL;
+        tv.tv_usec = 0;
+        if (select(fd + 1, &rfds, NULL, NULL, &tv) == 0) {
+            if (dots)
+                write(STDOUT_FILENO, "\n", 1);
+            fprintf(stderr, "ept: no data from server for %d seconds\n", STALL);
+            rc = -2;
+            goto done;
+        }
+        n = read(fd, readbuf, sizeof(readbuf));
+        if (n <= 0)
+            break;
         i = 0;
         if (hdr) {
             for (; i < n && hdr; i++) {
@@ -269,6 +291,19 @@ done:
         sprintf(hexsum + i * 2, "%02x", digest[i]);
     *size = total;
     return 0;
+}
+
+/* http_try, started again on a new connection when a transfer stalls */
+static int http_get(const char *rpath, const char *outfile, char *hexsum, long *size)
+{
+    int rc, try;
+
+    for (try = 1; ; try++) {
+        rc = http_try(rpath, outfile, hexsum, size);
+        if (rc != -2 || try == TRIES)
+            return rc;
+        fprintf(stderr, "ept: trying again (%d of %d)\n", try + 1, TRIES);
+    }
 }
 
 /* replace file 'to' with file 'from'; copies where rename is unsupported (FAT) */
