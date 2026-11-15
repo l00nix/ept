@@ -1,0 +1,15 @@
+# gem: FreeGEM/OpenGEM desktop for ELKS, with clock, calculator, HTTP viewer and IRC client
+GIT=https://github.com/parabyte/Gem-elks.git
+BUILD="make -f Makefile.elks ELKS_ROOT=$ELKS ELKS_CROSS=/usr/bin"
+FILES="build/bin/gem:/bin/gem
+build/bin/gemdesk:/bin/gemdesk
+build/bin/gemclock:/bin/gemclock
+build/bin/gemcalc:/bin/gemcalc
+build/bin/gemview:/bin/gemview
+build/bin/gemirc:/bin/gemirc
+assets/etc/gem.conf:/etc/gem.conf
+assets/lib/gemsys/gem.rsc:/lib/gemsys/gem.rsc
+assets/lib/gemsys/desktop.rsc:/lib/gemsys/desktop.rsc
+assets/lib/gemsys/desktop.inf:/lib/gemsys/desktop.inf
+assets/lib/gemsys/deskhi.icn:/lib/gemsys/deskhi.icn
+assets/lib/gemsys/desklo.icn:/lib/gemsys/desklo.icn"
