@@ -523,12 +523,21 @@ static int getfile(char **f)
 
     /* sline is free here: nested lookups are done before getfile is called */
     sprintf(sline, "%s/pool/%s%s", CHANDIR, name, dest);
-    if (http_get(sline, tmp, got, &size, atol(f[3])) != 0)
-        return 1;
-    if (size != atol(f[3]) || strcmp(got, sum) != 0) {
-        unlink(tmp);
-        fprintf(stderr, "ept: %s: checksum mismatch, file not installed\n", dest);
-        return 1;
+    if (!strcmp(f[3], "0")) {           /* an empty file needs no download */
+        int fd = open(tmp, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+
+        if (fd < 0 || close(fd) < 0) {
+            perror(tmp);
+            return 1;
+        }
+    } else {
+        if (http_get(sline, tmp, got, &size, atol(f[3])) != 0)
+            return 1;
+        if (size != atol(f[3]) || strcmp(got, sum) != 0) {
+            unlink(tmp);
+            fprintf(stderr, "ept: %s: checksum mismatch, file not installed\n", dest);
+            return 1;
+        }
     }
     if (replace(tmp, dest) != 0) {
         unlink(tmp);
