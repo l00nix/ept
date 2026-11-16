@@ -433,7 +433,7 @@ static int instver(const char *name, char *ver)
     return found;
 }
 
-/* does the index list dest as part of package name? */
+/* does the index list dest as part of package name? any file if dest is NULL */
 static int inindex(const char *name, const char *dest)
 {
     FILE *fp;
@@ -443,7 +443,8 @@ static int inindex(const char *name, const char *dest)
     if ((fp = fopen(IDX, "r")) == NULL)
         return 0;
     while (!found && fgets(sline, sizeof(sline), fp))
-        if (split(sline, f, NIDX) == NIDX && !strcmp(f[0], name) && !strcmp(f[5], dest))
+        if (split(sline, f, NIDX) == NIDX && !strcmp(f[0], name)
+                && (!dest || !strcmp(f[5], dest)))
             found = 1;
     fclose(fp);
     return found;
@@ -772,7 +773,7 @@ static int rmpkg(const char *pkg)
 
 static int list(int c)
 {
-    FILE *ix;
+    FILE *ix, *db;
     char *f[NIDX];
     char prev[64], ver[64];
     int inst;
@@ -804,6 +805,21 @@ static int list(int c)
                 inst == 2 ? " nightly" : "");
     }
     fclose(ix);
+
+    /* installed packages this list does not have from any other channel */
+    if ((db = fopen(DB, "r")) != NULL) {
+        prev[0] = '\0';
+        while (fgets(dline, sizeof(dline), db)) {
+            if (split(dline, f, NDB) != NDB || !strcmp(f[0], prev))
+                continue;
+            strncpy(prev, f[0], sizeof(prev) - 1);
+            prev[sizeof(prev) - 1] = '\0';
+            if (!inindex(f[0], NULL))
+                printf("%-14s %-12s [installed %s%s]\n", f[0], "-", f[1],
+                    f[4][0] == 'n' ? " nightly" : "");
+        }
+        fclose(db);
+    }
     return 0;
 }
 
