@@ -1,6 +1,9 @@
 /*
  * ept - ELKS Package Tool
  *
+ * Copyright (c) 2026 Sam Warr
+ * SPDX-License-Identifier: MIT
+ *
  * Installs and updates programs from a plain HTTP package repository.
  *
  * Index line:      name version md5 size mode dest
