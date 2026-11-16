@@ -69,6 +69,8 @@ static int nrepo;
 static int repo;                /* the repository host, port and base are set for */
 static unsigned char live[2];   /* per channel: repositories with a usable package list */
 static char idxname[sizeof(NINDEX) + 4];
+static int quiet;               /* a 404 is no error: this repository has no such list */
+static int notfound;            /* the last reply was a 404 */
 static char **args;             /* argv as given, to start ept again */
 
 #define IDX         idx()
@@ -266,6 +268,7 @@ static int http_try(const char *rpath, const char *outfile, char *hexsum, long *
         fprintf(stderr, "ept: URL too long\n");
         return -1;
     }
+    notfound = 0;
     fflush(stdout);                     /* meter uses write(); keep it in order */
     fd = net_connect();
     if (fd < 0) {
@@ -327,7 +330,9 @@ static int http_try(const char *rpath, const char *outfile, char *hexsum, long *
                 status[slen] = '\0';
                 if (strncmp(status, "HTTP/1.", 7) != 0 || strncmp(status + 9, "200", 3) != 0) {
                     status[12] = '\0';
-                    fprintf(stderr, "ept: server answered '%s' for %s%s\n",
+                    notfound = slen >= 12 && !strncmp(status + 9, "404", 3);
+                    if (!(notfound && quiet))
+                        fprintf(stderr, "ept: server answered '%s' for %s%s\n",
                         slen >= 12 ? status + 9 : "?", base, rpath);
                     goto done;
                 }
@@ -509,7 +514,10 @@ static int findrepo(const char *pkg)
     return -1;
 }
 
-/* fetch the package list of channel c from the current repository */
+/*
+ * Fetch the package list of channel c from the current repository:
+ * 0 ok, 1 failed, 2 the repository has no nightly builds
+ */
 static int update(int c)
 {
     FILE *fp;
@@ -524,8 +532,12 @@ static int update(int c)
         printf("Fetching http://%s%s%s\n", host, base, sline);
     else
         printf("Fetching http://%s:%d%s%s\n", host, port, base, sline);
-    if (http_get(sline, IDXNEW, sum, &size, 0) != 0)
-        return 1;
+    quiet = c;
+    ok = http_get(sline, IDXNEW, sum, &size, 0);
+    quiet = 0;
+    if (ok != 0)
+        return c && notfound ? 2 : 1;
+    ok = 0;
     if ((fp = fopen(IDXNEW, "r")) == NULL) {
         perror(IDXNEW);
         return 1;
@@ -557,15 +569,21 @@ static int update(int c)
  */
 static int fetchall(int c)
 {
-    int i;
+    int i, rc, none = 0;
 
     for (i = 0; i < nrepo; i++) {
         userepo(i);
-        if (update(c) == 0)
+        rc = update(c);
+        if (rc == 0)
             live[c] |= 1 << i;
+        else if (rc == 2)
+            none++;
         else if (nrepo > 1)
             fprintf(stderr, "ept: skipping %s%s\n", repos[i], c ? " (nightly)" : "");
     }
+    if (none == nrepo)
+        fprintf(stderr, "ept: no nightly builds in %s\n",
+            nrepo > 1 ? "any repository" : repos[0]);
     return live[c] ? 0 : 1;
 }
 
@@ -947,11 +965,16 @@ static int list(int c)
     char *f[NIDX];
     char prev[64], ver[64], avail[64];
     long size = 0;
-    int i, inst, more, show = 0;
+    int i, rc, inst, more, show = 0, none = 0;
 
     for (i = 0; i < nrepo; i++) {
         userepo(i);
-        if (update(c) != 0) {
+        rc = update(c);
+        if (rc == 2) {
+            none++;
+            continue;
+        }
+        if (rc != 0) {
             /* no network: the saved list is still worth showing */
             chan = c;
             if (access(IDX, 0) != 0)
@@ -960,6 +983,9 @@ static int list(int c)
         }
         live[c] |= 1 << i;
     }
+    if (none == nrepo)
+        fprintf(stderr, "ept: no nightly builds in %s\n",
+            nrepo > 1 ? "any repository" : repos[0]);
     if (!live[c])
         return 1;
     chan = c;
