@@ -33,7 +33,7 @@ Every download is checked against the size and MD5 in the package list before it
 
 A project without tags only gets nightlies.
 
-Each index line is `name version md5 size mode dest`; the file starts with `#ept1` and ends with `#end`. `server/eptrepo` maintains it:
+Each index line is `name version md5 size mode dest`; the file starts with `#ept1` and ends with `#end`. A `#min <version>` line names the oldest `ept` that can use the repository: an older one installs the `ept` package and starts again before it installs anything else. The version comes from `MINEPT` in `server/eptrepo`. `server/eptrepo` maintains it:
 
 ```
 eptrepo add [-s] <repo> <name> <version> <file> <dest> [<file> <dest> ...]

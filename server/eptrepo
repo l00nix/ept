@@ -22,6 +22,11 @@
 
 set -e
 
+# The oldest ept that can use a repository made by this script. It goes into
+# the index as "#min <version>"; an older ept then updates itself before it
+# installs anything. Raise it when the repository starts to need a newer ept.
+MINEPT=1.2
+
 usage()
 {
 	sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'
@@ -47,6 +52,7 @@ index()
 	[ -d "$repo/pool" ] || die "$repo/pool: no such directory"
 	out=$repo/.index.$$		# unique, so concurrent runs cannot clobber each other
 	echo "#ept1" > "$out"
+	echo "#min $MINEPT" >> "$out"
 	npkg=0
 	nfile=0
 	for dir in "$repo"/pool/*/; do

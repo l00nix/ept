@@ -7,6 +7,9 @@
  * Installed line:  name version md5 dest channel       (channel is s or n)
  * File URL:        <repo>/pool/<name><dest>
  *
+ * A "#min <version>" line in the index names the oldest ept that can use
+ * the repository; an older ept updates itself before it installs anything.
+ *
  * The nightly channel (-n) is a second repository of the same layout
  * under <repo>/nightly. Each installed package remembers its channel.
  */
@@ -25,7 +28,8 @@
 
 #include "md5.c"                /* md5_t, md5_init/update/final, readbuf[BUFSIZ] */
 
-#define VERSION     "0.1"
+#define VERSION     "1.2"
+#define SELF        "/bin/ept"
 #define DEFREPO     "http://ept.samwarr.dev"
 #define CONFIG      "/etc/ept.cfg"
 #define DIR         "/etc/ept"
@@ -51,6 +55,7 @@ static char sline[LINESZ];      /* nested lookups */
 static char tmp[LINESZ];
 static char names[1024];
 static int chan;                /* 0 = stable, 1 = nightly */
+static char **args;             /* argv as given, to start ept again */
 
 #define IDX         (chan ? NINDEX : INDEX)
 #define IDXNEW      (chan ? NINDEXNEW : INDEXNEW)
@@ -618,6 +623,58 @@ static int ipkg(const char *pkg, int c)
     return 0;
 }
 
+/* compare dotted version numbers: <0, 0 or >0 like strcmp */
+static int vercmp(const char *a, const char *b)
+{
+    long x, y;
+
+    for (;;) {
+        x = strtol(a, (char **)&a, 10);
+        y = strtol(b, (char **)&b, 10);
+        if (x != y)
+            return x < y ? -1 : 1;
+        if (*a != '.' && *b != '.')
+            return 0;
+        if (*a == '.')
+            a++;
+        if (*b == '.')
+            b++;
+    }
+}
+
+/*
+ * If the package list of channel c asks for a newer ept than this one,
+ * install the ept package and start it again to finish off the install
+ */
+static void selfupdate(int c)
+{
+    FILE *fp;
+    char *f[2];
+    int need = 0;
+
+    chan = c;
+    if ((fp = fopen(IDX, "r")) == NULL)
+        return;
+    /* "#min <version>" is one of the comment lines before the first package */
+    while (!need && fgets(sline, sizeof(sline), fp) && sline[0] == '#')
+        if (split(sline, f, 2) == 2 && !strcmp(f[0], "#min") && vercmp(VERSION, f[1]) < 0)
+            need = 1;
+    fclose(fp);
+    if (!need)
+        return;
+    printf("This repository needs ept %s, this is ept " VERSION ": updating ept first\n", f[1]);
+    /* EPTSELF is set when this already is the updated ept */
+    if (getenv("EPTSELF") || ipkg("ept", c) != 0) {
+        fprintf(stderr, "ept: cannot update ept itself, install a newer " SELF " by hand\n");
+        exit(1);
+    }
+    putenv("EPTSELF=1");
+    fflush(stdout);
+    execv(SELF, args);
+    perror(SELF);
+    exit(1);
+}
+
 static int install(int argc, char **argv, int c)
 {
     int i, rc = 0;
@@ -629,6 +686,7 @@ static int install(int argc, char **argv, int c)
             return 1;
     } else
         need_index(0);
+    selfupdate(c);
     for (i = 0; i < argc; i++) {
         switch (ipkg(argv[i], c)) {
         case 1:
@@ -652,6 +710,7 @@ static int upgrade(void)
 
     if (update(0) != 0)
         return 1;
+    selfupdate(0);
     names[0] = '\0';
     p = names;
     if ((db = fopen(DB, "r")) != NULL) {
@@ -677,6 +736,8 @@ static int upgrade(void)
     }
     if (nightly && update(1) != 0)
         return 1;
+    if (nightly)
+        selfupdate(1);
     for (p = names; *p; p += strlen(p) + 1) {
         switch (ipkg(p + 1, *p == 'n')) {
         case 1:
@@ -761,6 +822,7 @@ int main(int argc, char **argv)
 
     if (argc < 2)
         usage();
+    args = argv;
     cmd = argv[1];
     if (argc > 2 && !strcmp(argv[2], "-n")) {
         nightly = 1;
