@@ -40,3 +40,7 @@ eptrepo add <repo> <name> <version> <file> <dest> [<file> <dest> ...]
 eptrepo index <repo>
 ```
 
+If `<file>` is a directory, everything in it is added below `<dest>`, so a whole tree is one pair, e.g. `eptrepo add repo c86 1.0 target /`. Recipes take the same form in `FILES`, e.g. `include:/usr/include`. Only regular files are published (symlinks are followed), and a file may not be empty or have characters other than letters, digits and `. _ + -` in its name.
+
+`eptrepo index` builds the list from whatever is in `pool/`, so a package can also be maintained by hand: copy the files to `pool/<name>/`, write `pool/<name>/VERSION`, and run `eptrepo index <repo>`.
+

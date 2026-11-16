@@ -8,7 +8,8 @@
 # Each /recipes/<name>.pkg is a shell fragment that sets:
 #   GIT     git URL of the project
 #   BUILD   command that builds it, run in the checkout
-#   FILES   "built-file:/install/path ..." pairs
+#   FILES   "built-file:/install/path ..." pairs; a directory on the left
+#           installs everything in it below the path, e.g. "include:/usr/include"
 #   BRANCH  (optional) branch nightlies are built from, default: remote HEAD
 #   STABLE  (optional) set to "no" to publish nightlies only and ignore tags
 #
@@ -110,7 +111,12 @@ build_one()
 		return 1
 	fi
 	for pair in $FILES; do
-		if [ ! -s "$src/${pair%%:*}" ]; then
+		if [ -d "$src/${pair%%:*}" ]; then
+			if [ -z "$(find -L "$src/${pair%%:*}" -type f | head -1)" ]; then
+				log "ERROR: $name: ${pair%%:*} contains no files"
+				return 1
+			fi
+		elif [ ! -s "$src/${pair%%:*}" ]; then
 			log "ERROR: $name: build did not produce ${pair%%:*}"
 			return 1
 		fi

@@ -11,12 +11,15 @@
 # Usage:
 #   eptrepo add <repo> <name> <version> <file> <dest> [<file> <dest> ...]
 #   eptrepo index <repo>
+#
+# If <file> is a directory, everything in it is added below <dest>,
+# e.g. "include /usr/include" or "target /". Symlinks are followed.
 
 set -e
 
 usage()
 {
-	sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'
+	sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'
 	exit 1
 }
 
@@ -76,15 +79,22 @@ add()
 	checkword "$version"
 	rm -rf "$repo/pool/$name"
 	mkdir -p "$repo/pool/$name"
-	echo "$version" > "$repo/pool/$name/VERSION"
 	while [ $# -ge 2 ]; do
 		case "$2" in /*) ;; *) die "$2: destination must be an absolute path";; esac
 		checkword "$2"
-		mkdir -p "$repo/pool/$name`dirname "$2"`"
-		cp -p "$1" "$repo/pool/$name$2"
+		if [ -d "$1" ]; then
+			# a directory: copy its contents below <dest>
+			mkdir -p "$repo/pool/$name$2"
+			cp -RpL "$1/." "$repo/pool/$name$2/"
+		else
+			mkdir -p "$repo/pool/$name`dirname "$2"`"
+			cp -p "$1" "$repo/pool/$name$2"
+		fi
 		shift 2
 	done
 	[ $# -eq 0 ] || usage
+	# written last, so a copied tree cannot replace it
+	echo "$version" > "$repo/pool/$name/VERSION"
 	index "$repo"
 }
 
