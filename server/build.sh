@@ -162,7 +162,7 @@ build_recipe()
 
 	# nightly: head of the branch
 	head=origin/${BRANCH:-HEAD}
-	version=$(git -C "$src" log -1 --date=format:%Y%m%d --format=%cd-%h "$head") || return 1
+	version=$(git -C "$src" log -1 --abbrev=7 --date=format:%Y%m%d --format=%cd-%h "$head") || return 1
 	if [ -n "$force" ] || [ "$(cat "$REPO/nightly/pool/$name/VERSION" 2>/dev/null)" != "$version" ]; then
 		build_one "$name" "$head" "$version" "$REPO/nightly"
 	fi
