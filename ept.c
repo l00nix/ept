@@ -75,9 +75,10 @@ static void usage(void)
         "Usage: ept update                  fetch the package lists\n"
         "       ept list [-n]               show available and installed packages\n"
         "       ept install [-n] <pkg> ...  install or reinstall packages\n"
-        "       ept upgrade                 update all installed packages\n"
+        "       ept upgrade [-y]            update all installed packages\n"
         "       ept remove <pkg> ...        remove packages\n"
-        "  -n   use the nightly builds instead of the tagged releases\n");
+        "  -n   use the nightly builds instead of the tagged releases\n"
+        "  -y   do not ask before upgrading\n");
     exit(1);
 }
 
@@ -454,10 +455,9 @@ static int inindex(const char *name, const char *dest)
 static int update(int c)
 {
     FILE *fp;
-    char *f[NIDX];
-    char sum[33], prev[64];
+    char sum[33];
     long size;
-    int first = 1, ok = 0, count = 0;
+    int first = 1, ok = 0;
 
     chan = c;
     mkdir(DIR, 0755);
@@ -472,7 +472,6 @@ static int update(int c)
         perror(IDXNEW);
         return 1;
     }
-    prev[0] = '\0';
     while (fgets(iline, sizeof(iline), fp)) {
         chomp(iline);
         if (first) {
@@ -482,13 +481,6 @@ static int update(int c)
             continue;
         }
         ok = !strcmp(iline, "#end");        /* must be the last line */
-        if (iline[0] == '#')
-            continue;
-        if (split(iline, f, NIDX) == NIDX && strcmp(f[0], prev) != 0) {
-            strncpy(prev, f[0], sizeof(prev) - 1);
-            prev[sizeof(prev) - 1] = '\0';
-            count++;
-        }
     }
     fclose(fp);
     if (!ok) {
@@ -498,8 +490,64 @@ static int update(int c)
     }
     if (replace(IDXNEW, IDX) != 0)
         return 1;
-    printf("%d %spackages available\n", count, chan ? "nightly " : "");
     return 0;
+}
+
+/*
+ * Show the installed packages that have another version in their package list
+ * and return how many there are. They are also left in names, each as its
+ * channel letter followed by the name, with an empty entry at the end.
+ */
+static int pending(void)
+{
+    FILE *db, *ix;
+    char *d[NDB], *f[NIDX];
+    char *p = names;
+    char prev[64];
+    int n = 0, nn = 0, found;
+
+    names[0] = '\0';
+
+    if ((db = fopen(DB, "r")) != NULL) {
+        prev[0] = '\0';
+        while (fgets(dline, sizeof(dline), db)) {
+            if (split(dline, d, NDB) != NDB || !strcmp(d[0], prev))
+                continue;
+            strncpy(prev, d[0], sizeof(prev) - 1);
+            prev[sizeof(prev) - 1] = '\0';
+            chan = d[4][0] == 'n';
+            if ((ix = fopen(IDX, "r")) == NULL)
+                continue;
+            found = 0;
+            while (!found && fgets(sline, sizeof(sline), ix))
+                if (split(sline, f, NIDX) == NIDX && !strcmp(f[0], d[0]))
+                    found = 1;
+            fclose(ix);
+            if (found && strcmp(f[1], d[1]) != 0) {
+                if (p + strlen(d[0]) + 3 > names + sizeof(names)) {
+                    fprintf(stderr, "ept: too many packages, some not checked\n");
+                    break;
+                }
+                *p++ = d[4][0];
+                strcpy(p, d[0]);
+                p += strlen(p) + 1;
+                *p = '\0';
+                printf("  %-14s %s -> %s%s\n", d[0], d[1], f[1], chan ? " (nightly)" : "");
+                n++;
+                nn += chan;
+            }
+        }
+        fclose(db);
+    }
+    if (n == 0)
+        printf("All packages are up to date\n");
+    else {
+        printf("%d package update%s available", n, n == 1 ? "" : "s");
+        if (nn)
+            printf(" (%d nightly)", nn);
+        printf("\n");
+    }
+    return n;
 }
 
 /* download, verify and install one file of a package */
@@ -692,53 +740,34 @@ static int install(int argc, char **argv, int c)
     return rc;
 }
 
-static int upgrade(void)
+/* update the installed packages that have a new version, after asking unless yes is set */
+static int upgrade(int yes)
 {
-    FILE *db;
-    char *f[NDB];
-    char *p, *last = NULL;
-    int rc = 0, nightly = 0;
+    char *p;
+    int rc = 0;
 
     if (update(0) != 0)
         return 1;
     selfupdate(0);
-    names[0] = '\0';
-    p = names;
-    if ((db = fopen(DB, "r")) != NULL) {
-        while (fgets(dline, sizeof(dline), db)) {
-            if (split(dline, f, NDB) != NDB)
-                continue;
-            if (last && !strcmp(last, f[0]))
-                continue;
-            if (p + strlen(f[0]) + 3 > names + sizeof(names)) {
-                fprintf(stderr, "ept: too many packages, some not checked\n");
-                rc = 1;
-                break;
-            }
-            *p++ = f[4][0];             /* channel letter, then the name */
-            if (f[4][0] == 'n')
-                nightly = 1;
-            last = p;
-            strcpy(p, f[0]);
-            p += strlen(p) + 1;
-            *p = '\0';                  /* list ends with an empty entry */
-        }
-        fclose(db);
-    }
-    if (nightly && update(1) != 0)
-        return 1;
-    if (nightly)
+    if (access(NINDEX, 0) == 0) {       /* nightly channel in use */
+        if (update(1) != 0)
+            return 1;
         selfupdate(1);
-    for (p = names; *p; p += strlen(p) + 1) {
-        switch (ipkg(p + 1, *p == 'n')) {
-        case 1:
-            rc = 1;
-            break;
-        case 2:
-            printf("%s is no longer in the repository, keeping it\n", p + 1);
-            break;
+    }
+    if (pending() == 0)
+        return 0;
+    if (!yes) {
+        printf("Upgrade? [Y/n] ");
+        fflush(stdout);
+        if (fgets(tmp, sizeof(tmp), stdin) == NULL
+                || (tmp[0] != 'y' && tmp[0] != 'Y' && tmp[0] != '\n')) {
+            printf("Nothing upgraded\n");
+            return 0;
         }
     }
+    for (p = names; *p; p += strlen(p) + 1)
+        if (ipkg(p + 1, *p == 'n') != 0)
+            rc = 1;
     return rc;
 }
 
@@ -842,6 +871,8 @@ int main(int argc, char **argv)
         rc = update(0);
         if (rc == 0 && access(NINDEX, 0) == 0)      /* nightly channel in use */
             rc = update(1);
+        if (rc == 0)
+            pending();
         return rc;
     }
     if (!strcmp(cmd, "list"))
@@ -849,7 +880,7 @@ int main(int argc, char **argv)
     if (!strcmp(cmd, "install"))
         return install(argc - 2, argv + 2, nightly);
     if (!strcmp(cmd, "upgrade"))
-        return upgrade();
+        return upgrade(argc > 2 && !strcmp(argv[2], "-y"));
     if (!strcmp(cmd, "remove")) {
         if (argc < 3)
             usage();

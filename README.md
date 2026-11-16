@@ -7,11 +7,13 @@ A small package manager for [ELKS](https://github.com/ghaerr/elks). It downloads
 ept update                  fetch the package lists
 ept list [-n]               show available and installed packages
 ept install [-n] <pkg> ...  install or reinstall packages
-ept upgrade                 update all installed packages
+ept upgrade [-y]            update all installed packages
 ept remove <pkg> ...        remove packages
 ```
 
 `list`, `install` and `upgrade` fetch the package list first, so they never work from a stale one.
+
+`upgrade` shows what would change and asks first; `-y` skips the question.
 
 `-n` uses the nightly builds instead of the tagged releases. A package installed with `-n` stays on the nightly channel for `ept upgrade` until it is installed again without `-n`.
 
