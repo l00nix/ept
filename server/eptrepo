@@ -25,7 +25,7 @@ set -e
 # The oldest ept that can use a repository made by this script. It goes into
 # the index as "#min <version>"; an older ept then updates itself before it
 # installs anything. Raise it when the repository starts to need a newer ept.
-MINEPT=1.2
+MINEPT=1.3
 
 usage()
 {
