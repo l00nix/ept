@@ -9,17 +9,20 @@
 # Nightly builds use a second repository of the same layout in <repo>/nightly.
 #
 # Usage:
-#   eptrepo add <repo> <name> <version> <file> <dest> [<file> <dest> ...]
+#   eptrepo add [-s] <repo> <name> <version> <file> <dest> [<file> <dest> ...]
 #   eptrepo index <repo>
 #
 # If <file> is a directory, everything in it is added below <dest>,
 # e.g. "include /usr/include" or "target /". Symlinks are followed.
+# A tree with files that cannot be published (dangling symlinks, symlinks
+# out of the tree, empty files, bad names) is refused and the package is
+# left as it was; with -s those files are reported and skipped instead.
 
 set -e
 
 usage()
 {
-	sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'
+	sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'
 	exit 1
 }
 
@@ -70,31 +73,87 @@ index()
 	echo "$repo/index: $npkg packages, $nfile files"
 }
 
+# note <message>: report a file that cannot be published
+note()
+{
+	echo "eptrepo: $*" >&2
+	echo x >> "$stage.bad"
+}
+
+# addtree <dir> <dest>: copy the files of a tree into the staging directory.
+# Files that cannot be published are reported and left out.
+addtree()
+{
+	root=`cd "$1" && pwd -P`
+	prefix=${2%/}
+	# with -L, the only symlinks left are the ones that cannot be followed
+	(cd "$1" && find -L . \( -type f -o -type l \) | LC_ALL=C sort) > "$stage.list" ||
+		note "$1: could not be read completely"
+	while IFS= read -r f; do
+		f=${f#./}
+		why=
+		if [ ! -e "$1/$f" ]; then
+			why="dangling symlink"
+		elif [ ! -s "$1/$f" ]; then
+			why="empty file"
+		else
+			# a symlink out of the tree would publish a file of this host
+			case `readlink -f "$1/$f"` in
+			"$root"/*) ;;
+			*) why="symlink to a file outside $1";;
+			esac
+			case "$prefix/$f" in
+			*[!A-Za-z0-9._/+-]*) why="name has characters other than letters, digits and . _ + -";;
+			esac
+		fi
+		if [ "$why" ]; then
+			note "$1/$f: $why"
+		else
+			mkdir -p "$stage`dirname "$prefix/$f"`"
+			cp -pL "$1/$f" "$stage$prefix/$f"
+		fi
+	done < "$stage.list"
+}
+
 add()
 {
+	skip=
+	if [ "$1" = -s ]; then skip=1; shift; fi
 	[ $# -ge 5 ] || usage
 	repo=$1 name=$2 version=$3
 	shift 3
 	checkword "$name"
 	checkword "$version"
-	rm -rf "$repo/pool/$name"
-	mkdir -p "$repo/pool/$name"
+	# The package is put together in a staging directory and only replaces
+	# the published one when it is complete.
+	mkdir -p "$repo/pool"
+	stage=$repo/.add.$$
+	trap 'rm -rf "$stage" "$stage.list" "$stage.bad"' EXIT
+	rm -rf "$stage"
+	mkdir "$stage"
 	while [ $# -ge 2 ]; do
 		case "$2" in /*) ;; *) die "$2: destination must be an absolute path";; esac
 		checkword "$2"
 		if [ -d "$1" ]; then
-			# a directory: copy its contents below <dest>
-			mkdir -p "$repo/pool/$name$2"
-			cp -RpL "$1/." "$repo/pool/$name$2/"
+			addtree "$1" "$2"
 		else
-			mkdir -p "$repo/pool/$name`dirname "$2"`"
-			cp -p "$1" "$repo/pool/$name$2"
+			[ -s "$1" ] || die "$1: missing or empty"
+			mkdir -p "$stage`dirname "$2"`"
+			cp -pL "$1" "$stage$2"
 		fi
 		shift 2
 	done
 	[ $# -eq 0 ] || usage
+	if [ -s "$stage.bad" ]; then
+		n=`wc -l < "$stage.bad" | tr -d ' '`
+		[ "$skip" ] || die "$name not changed: $n files cannot be published (-s skips them)"
+		echo "eptrepo: $name: $n files skipped" >&2
+	fi
+	[ "`find "$stage" -type f | head -1`" ] || die "$name: no files to publish"
 	# written last, so a copied tree cannot replace it
-	echo "$version" > "$repo/pool/$name/VERSION"
+	echo "$version" > "$stage/VERSION"
+	rm -rf "$repo/pool/$name"
+	mv "$stage" "$repo/pool/$name"
 	index "$repo"
 }
 

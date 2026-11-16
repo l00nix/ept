@@ -12,6 +12,8 @@
 #           installs everything in it below the path, e.g. "include:/usr/include"
 #   BRANCH  (optional) branch nightlies are built from, default: remote HEAD
 #   STABLE  (optional) set to "no" to publish nightlies only and ignore tags
+#   SKIP    (optional) set to "yes" to leave out files of a FILES directory that
+#           cannot be published (e.g. dangling symlinks) instead of failing
 #
 # Recipes are read from /recipes, or, when RECIPES_GIT is set, from that git
 # repository (subdirectory RECIPES_SUBDIR), which is pulled before every cycle.
@@ -123,7 +125,7 @@ build_one()
 		args+=("$src/${pair%%:*}" "${pair#*:}")
 	done
 	mkdir -p "$repo"
-	eptrepo add "$repo" "$name" "$version" "${args[@]}" && log "$name $version published to $repo"
+	eptrepo add ${SKIP:+-s} "$repo" "$name" "$version" "${args[@]}" && log "$name $version published to $repo"
 }
 
 # build_recipe <file> [force]
@@ -131,8 +133,9 @@ build_recipe()
 {
 	local recipe=$1 force=$2 name src tag head version
 	name=$(basename "$recipe" .pkg)
-	GIT= BUILD= FILES= BRANCH= STABLE=
+	GIT= BUILD= FILES= BRANCH= STABLE= SKIP=
 	. "$recipe"
+	[ "$SKIP" = yes ] || SKIP=
 	if [ -z "$GIT" ] || [ -z "$BUILD" ] || [ -z "$FILES" ]; then
 		log "ERROR: $recipe must set GIT, BUILD and FILES"
 		return 1
