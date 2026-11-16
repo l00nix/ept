@@ -28,7 +28,7 @@
 
 #include "md5.c"                /* md5_t, md5_init/update/final, readbuf[BUFSIZ] */
 
-#define VERSION     "1.2"
+#define VERSION     "1.3"
 #define SELF        "/bin/ept"
 #define DEFREPO     "http://ept.samwarr.dev"
 #define CONFIG      "/etc/ept.cfg"
@@ -501,13 +501,6 @@ static int update(int c)
     return 0;
 }
 
-static void need_index(int c)
-{
-    chan = c;
-    if (access(IDX, 0) != 0 && update(c) != 0)
-        exit(1);
-}
-
 /* download, verify and install one file of a package */
 static int getfile(char **f)
 {
@@ -681,11 +674,8 @@ static int install(int argc, char **argv, int c)
 
     if (argc < 1)
         usage();
-    if (c) {
-        if (update(1) != 0)             /* nightlies change often: always refresh */
-            return 1;
-    } else
-        need_index(0);
+    if (update(c) != 0)                 /* never install from a stale list */
+        return 1;
     selfupdate(c);
     for (i = 0; i < argc; i++) {
         switch (ipkg(argv[i], c)) {
@@ -787,11 +777,13 @@ static int list(int c)
     char prev[64], ver[64];
     int inst;
 
-    if (c) {
-        if (update(1) != 0)
+    if (update(c) != 0) {
+        /* no network: the saved list is still worth showing */
+        chan = c;
+        if (access(IDX, 0) != 0)
             return 1;
-    } else
-        need_index(0);
+        printf("Showing the saved package list\n");
+    }
     if ((ix = fopen(IDX, "r")) == NULL) {
         perror(IDX);
         return 1;

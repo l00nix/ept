@@ -11,6 +11,8 @@ ept upgrade                 update all installed packages
 ept remove <pkg> ...        remove packages
 ```
 
+`list`, `install` and `upgrade` fetch the package list first, so they never work from a stale one.
+
 `-n` uses the nightly builds instead of the tagged releases. A package installed with `-n` stays on the nightly channel for `ept upgrade` until it is installed again without `-n`.
 
 ### On ELKS
