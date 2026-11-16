@@ -28,7 +28,7 @@
 
 #include "md5.c"                /* md5_t, md5_init/update/final, readbuf[BUFSIZ] */
 
-#define VERSION     "1.3"
+#define VERSION     "1.4"
 #define SELF        "/bin/ept"
 #define DEFREPO     "http://ept.samwarr.dev"
 #define CONFIG      "/etc/ept.cfg"
@@ -61,6 +61,7 @@ static char **args;             /* argv as given, to start ept again */
 #define IDXNEW      (chan ? NINDEXNEW : INDEXNEW)
 #define CHANDIR     (chan ? "/nightly" : "")
 #define CHANNAME    (chan ? "n" : "s")
+#define KB(n)       (((n) + 1023) / 1024)   /* bytes to K, rounded up */
 
 static void die(const char *msg)
 {
@@ -503,7 +504,8 @@ static int pending(void)
     FILE *db, *ix;
     char *d[NDB], *f[NIDX];
     char *p = names;
-    char prev[64];
+    char prev[64], ver[64];
+    long size, total = 0;
     int n = 0, nn = 0, found;
 
     names[0] = '\0';
@@ -518,12 +520,24 @@ static int pending(void)
             chan = d[4][0] == 'n';
             if ((ix = fopen(IDX, "r")) == NULL)
                 continue;
+            /* the lines of a package follow each other: version and total size */
             found = 0;
-            while (!found && fgets(sline, sizeof(sline), ix))
-                if (split(sline, f, NIDX) == NIDX && !strcmp(f[0], d[0]))
+            size = 0;
+            while (fgets(sline, sizeof(sline), ix)) {
+                if (split(sline, f, NIDX) != NIDX || strcmp(f[0], d[0]) != 0) {
+                    if (found)
+                        break;
+                    continue;
+                }
+                if (!found) {
+                    strncpy(ver, f[1], sizeof(ver) - 1);
+                    ver[sizeof(ver) - 1] = '\0';
                     found = 1;
+                }
+                size += atol(f[3]);
+            }
             fclose(ix);
-            if (found && strcmp(f[1], d[1]) != 0) {
+            if (found && strcmp(ver, d[1]) != 0) {
                 if (p + strlen(d[0]) + 3 > names + sizeof(names)) {
                     fprintf(stderr, "ept: too many packages, some not checked\n");
                     break;
@@ -532,7 +546,9 @@ static int pending(void)
                 strcpy(p, d[0]);
                 p += strlen(p) + 1;
                 *p = '\0';
-                printf("  %-14s %s -> %s%s\n", d[0], d[1], f[1], chan ? " (nightly)" : "");
+                printf("  %-14s %s -> %s  %ldK%s\n", d[0], d[1], ver, KB(size),
+                    chan ? " (nightly)" : "");
+                total += size;
                 n++;
                 nn += chan;
             }
@@ -545,7 +561,7 @@ static int pending(void)
         printf("%d package update%s available", n, n == 1 ? "" : "s");
         if (nn)
             printf(" (%d nightly)", nn);
-        printf("\n");
+        printf(", up to %ldK to download\n", KB(total));
     }
     return n;
 }
@@ -804,8 +820,9 @@ static int list(int c)
 {
     FILE *ix, *db;
     char *f[NIDX];
-    char prev[64], ver[64];
-    int inst;
+    char prev[64], ver[64], avail[64];
+    long size = 0;
+    int inst, more;
 
     if (update(c) != 0) {
         /* no network: the saved list is still worth showing */
@@ -818,20 +835,31 @@ static int list(int c)
         perror(IDX);
         return 1;
     }
+    /* one line per package, printed after its last file so the size is complete */
     prev[0] = '\0';
-    while (fgets(iline, sizeof(iline), ix)) {
-        if (iline[0] == '#' || split(iline, f, NIDX) != NIDX || !strcmp(f[0], prev))
+    for (;;) {
+        more = fgets(iline, sizeof(iline), ix) != NULL;
+        if (more && (iline[0] == '#' || split(iline, f, NIDX) != NIDX))
             continue;
-        strncpy(prev, f[0], sizeof(prev) - 1);
-        prev[sizeof(prev) - 1] = '\0';
-        inst = instver(f[0], ver);
-        if (!inst)
-            printf("%-14s %s\n", f[0], f[1]);
-        else if (!strcmp(ver, f[1]) && (inst == 2) == c)
-            printf("%-14s %-12s [installed]\n", f[0], f[1]);
-        else
-            printf("%-14s %-12s [installed %s%s]\n", f[0], f[1], ver,
-                inst == 2 ? " nightly" : "");
+        if (!more || strcmp(f[0], prev) != 0) {
+            if (prev[0]) {
+                inst = instver(prev, ver);
+                printf("%-14s %-12s %5ldK", prev, avail, KB(size));
+                if (inst && !strcmp(ver, avail) && (inst == 2) == c)
+                    printf("  [installed]");
+                else if (inst)
+                    printf("  [installed %s%s]", ver, inst == 2 ? " nightly" : "");
+                printf("\n");
+            }
+            if (!more)
+                break;
+            strncpy(prev, f[0], sizeof(prev) - 1);
+            prev[sizeof(prev) - 1] = '\0';
+            strncpy(avail, f[1], sizeof(avail) - 1);
+            avail[sizeof(avail) - 1] = '\0';
+            size = 0;
+        }
+        size += atol(f[3]);
     }
     fclose(ix);
 
@@ -844,7 +872,7 @@ static int list(int c)
             strncpy(prev, f[0], sizeof(prev) - 1);
             prev[sizeof(prev) - 1] = '\0';
             if (!inindex(f[0], NULL))
-                printf("%-14s %-12s [installed %s%s]\n", f[0], "-", f[1],
+                printf("%-14s %-12s %6s  [installed %s%s]\n", f[0], "-", "-", f[1],
                     f[4][0] == 'n' ? " nightly" : "");
         }
         fclose(db);
