@@ -20,11 +20,23 @@ ept remove <pkg> ...        remove packages
 ### On ELKS
 
 - Build: `make` (needs `ia16-elf-gcc` with the ELKS libc), then copy `ept` to `/bin/ept`.
-- Repository: defaults to `http://ept.samwarr.dev`. To use another one, put `REPO=http://host[:port][/path]` in `/etc/ept.cfg`.
-- State: `/etc/ept/index` and `/etc/ept/nindex` are the package lists, `/etc/ept/inst` records what is installed.
+- Repository: defaults to `http://ept.samwarr.dev`. To use others, put `REPO=http://host[:port][/path]` lines in `/etc/ept.cfg`; see [Repositories](#repositories).
+- State: `/etc/ept/index` and `/etc/ept/nindex` are the package lists (`index.1`, `nindex.1` and so on for extra repositories), `/etc/ept/inst` records what is installed.
 - Networking must be up first (`net start`).
 
 Every download is checked against the size and MD5 in the package list before it replaces anything. **ELKS has no TLS, so this catches corruption, not tampering.**
+
+### Repositories
+
+Every `REPO=` line in `/etc/ept.cfg` is a repository, up to 8 of them; [`ept.cfg`](ept.cfg) is a starting point. Without the file, or without a `REPO=` line in it, `http://ept.samwarr.dev` is used.
+
+**Every repository you list can install and replace files anywhere on the system, so only add ones you trust.**
+
+- The first repository is the primary. Only it can update `ept` itself: the `ept` package and the file `/bin/ept` are never taken from another one.
+- The others are extras, for things like a maintainer's test builds. For any other package a later line overrides an earlier one, so add extras below the primary.
+- Packages are matched by name only. A build published under the same name as a package of another repository replaces it; to have it installed next to the original, give it its own name and its own file paths, e.g. `lua-test` in `/bin/lua-test`.
+- Where a package comes from is not remembered. Add a repository that has a different build of something installed and `ept upgrade` offers that build; take the line out again and it offers the previous one.
+- A repository that cannot be reached, or has no nightly builds when `-n` is used, is skipped for that run. So is an extra that needs a newer `ept` than the primary provides.
 
 ### Repository format
 
