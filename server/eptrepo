@@ -13,16 +13,18 @@
 #   eptrepo index <repo>
 #
 # If <file> is a directory, everything in it is added below <dest>,
-# e.g. "include /usr/include" or "target /". Symlinks are followed.
-# A tree with files that cannot be published (dangling symlinks, symlinks
-# out of the tree, empty files, bad names) is refused and the package is
-# left as it was; with -s those files are reported and skipped instead.
+# e.g. "include /usr/include" or "target /". A symlink is published as a
+# copy of its target, which is looked up inside the package: /lib/x is the
+# package's /lib/x, as it will be on ELKS.
+# A package with files that cannot be published (symlinks to something not
+# in the package, bad names) is refused and the old one is left as it was;
+# with -s those files are reported and skipped instead.
 
 set -e
 
 usage()
 {
-	sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'
+	sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'
 	exit 1
 }
 
@@ -61,7 +63,6 @@ index()
 			checkword "$dest"
 			sum=`md5sum "$dir/$f" | cut -d' ' -f1`
 			size=`wc -c < "$dir/$f" | tr -d ' '`
-			[ "$size" -gt 0 ] || die "$name: $dest is empty"
 			if [ -x "$dir/$f" ]; then mode=755; else mode=644; fi
 			echo "$name $version $sum $size $mode $dest" >> "$out"
 			nfile=`expr $nfile + 1`
@@ -80,38 +81,72 @@ note()
 	echo x >> "$stage.bad"
 }
 
-# addtree <dir> <dest>: copy the files of a tree into the staging directory.
-# Files that cannot be published are reported and left out.
+# addtree <dir> <dest>: copy the files and symlinks of a tree into the
+# staging directory, below <dest>
 addtree()
 {
-	root=`cd "$1" && pwd -P`
-	prefix=${2%/}
-	# with -L, the only symlinks left are the ones that cannot be followed
-	(cd "$1" && find -L . \( -type f -o -type l \) | LC_ALL=C sort) > "$stage.list" ||
-		note "$1: could not be read completely"
+	mkdir -p "$stage$2"
+	(cd "$1" && d=$stage${2%/} find . \( -type f -o -type l \) -exec sh -c '
+		for f; do
+			mkdir -p "$d/${f%/*}" && cp -pP "$f" "$d/$f" || exit 1
+		done' sh {} +)
+}
+
+# Replace the symlinks in the staging directory by copies of what they point
+# to. The staging directory is taken as the root, as it will be on ELKS, so
+# /lib/x means <stage>/lib/x and never a file of this host. A link to a link
+# is resolved in a later pass; what is left after that cannot be published.
+resolvelinks()
+{
+	pass=0
+	while [ $pass -lt 10 ]; do
+		pass=`expr $pass + 1`
+		find "$stage" -type l > "$stage.list"
+		[ -s "$stage.list" ] || return 0
+		progress=
+		while IFS= read -r l; do
+			[ -L "$l" ] || continue
+			t=`readlink "$l"`
+			case "$t" in
+			/*) t=$stage$t;;
+			*)  t=`dirname "$l"`/$t;;
+			esac
+			r=`readlink -f "$t" 2>/dev/null` || continue
+			case "$r" in "$stage"/*) ;; *) continue;; esac
+			case "$l/" in "$r"/*) continue;; esac	# points to its own parent
+			if [ -f "$r" ]; then
+				rm "$l"
+				cp -p "$r" "$l"
+			elif [ -d "$r" ]; then
+				rm "$l"
+				cp -RpP "$r" "$l"
+			else
+				continue
+			fi
+			progress=1
+		done < "$stage.list"
+		[ "$progress" ] || break
+	done
+	find "$stage" -type l > "$stage.list"
+	while IFS= read -r l; do
+		note "${l#"$stage"} -> `readlink "$l"`: symlink target is not in the package"
+		rm -f "$l"
+	done < "$stage.list"
+}
+
+# Remove what the index cannot list: names with other characters than
+# checkword allows, and anything that is not a regular file.
+dropbad()
+{
+	find "$stage" -mindepth 1 -name '*[!A-Za-z0-9._+-]*' -prune -print > "$stage.list"
 	while IFS= read -r f; do
-		f=${f#./}
-		why=
-		if [ ! -e "$1/$f" ]; then
-			why="dangling symlink"
-		elif [ ! -s "$1/$f" ]; then
-			why="empty file"
-		else
-			# a symlink out of the tree would publish a file of this host
-			case `readlink -f "$1/$f"` in
-			"$root"/*) ;;
-			*) why="symlink to a file outside $1";;
-			esac
-			case "$prefix/$f" in
-			*[!A-Za-z0-9._/+-]*) why="name has characters other than letters, digits and . _ + -";;
-			esac
-		fi
-		if [ "$why" ]; then
-			note "$1/$f: $why"
-		else
-			mkdir -p "$stage`dirname "$prefix/$f"`"
-			cp -pL "$1/$f" "$stage$prefix/$f"
-		fi
+		note "${f#"$stage"}: name has characters other than letters, digits and . _ + -"
+	done < "$stage.list"
+	find "$stage" -mindepth 1 -name '*[!A-Za-z0-9._+-]*' -prune -exec rm -rf {} +
+	find "$stage" ! -type f ! -type d > "$stage.list"
+	while IFS= read -r f; do
+		note "${f#"$stage"}: not a regular file"
+		rm -f "$f"
 	done < "$stage.list"
 }
 
@@ -127,7 +162,7 @@ add()
 	# The package is put together in a staging directory and only replaces
 	# the published one when it is complete.
 	mkdir -p "$repo/pool"
-	stage=$repo/.add.$$
+	stage=`cd "$repo" && pwd -P`/.add.$$
 	trap 'rm -rf "$stage" "$stage.list" "$stage.bad"' EXIT
 	rm -rf "$stage"
 	mkdir "$stage"
@@ -137,13 +172,15 @@ add()
 		if [ -d "$1" ]; then
 			addtree "$1" "$2"
 		else
-			[ -s "$1" ] || die "$1: missing or empty"
+			[ -f "$1" ] || die "$1: no such file"
 			mkdir -p "$stage`dirname "$2"`"
 			cp -pL "$1" "$stage$2"
 		fi
 		shift 2
 	done
 	[ $# -eq 0 ] || usage
+	resolvelinks
+	dropbad
 	if [ -s "$stage.bad" ]; then
 		n=`wc -l < "$stage.bad" | tr -d ' '`
 		[ "$skip" ] || die "$name not changed: $n files cannot be published (-s skips them)"
