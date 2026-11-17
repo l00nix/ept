@@ -1,0 +1,15 @@
+# fortune: fortune and BOFH excuse reader for ELKS, from astrobleem's elkslodge.
+# Nightly only: the repository has no releases of the packages themselves.
+# bofh is the same program as fortune; it picks the excuses from its name.
+# The 245K of computer fortunes are a package of their own, fortune-extra.
+DESC="Random fortunes and BOFH excuses: fortune, bofh"
+GIT=https://github.com/astrobleem/elkslodge.git
+STABLE=no
+BUILD="make -C packages/fortune/src ELKS_ROOT=$ELKS TOOLCHAIN=/usr"
+FILES="packages/fortune/src/fortune:/bin/fortune
+packages/fortune/src/fortune:/bin/bofh
+packages/fortune/lib/fortune/fortunes:/usr/lib/fortune/fortunes
+packages/fortune/lib/fortune/fortunes.idx:/usr/lib/fortune/fortunes.idx
+packages/fortune/lib/fortune/bofh:/usr/lib/fortune/bofh
+packages/fortune/lib/fortune/bofh.idx:/usr/lib/fortune/bofh.idx
+packages/fortune/licenses/fortune-mod.txt:/usr/lib/fortune/license"

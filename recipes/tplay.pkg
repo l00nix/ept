@@ -1,0 +1,9 @@
+# tplay: MIDI player for the Tandy 1000 sound chip, from astrobleem's elkslodge.
+# Experimental, and Tandy only: it does port I/O to the PSG when run with --tandy.
+# Nightly only: the repository has no releases of the packages themselves.
+DESC="MIDI player for the Tandy 1000 sound chip (experimental)"
+GIT=https://github.com/astrobleem/elkslodge.git
+STABLE=no
+BUILD="ELKS_ROOT=$ELKS TOOLCHAIN=/usr sh packages/tplay/build_tplay.sh"
+FILES="packages/tplay/tplay:/bin/tplay
+packages/tplay/elksbeat.mid:/usr/lib/elksbeat.mid"

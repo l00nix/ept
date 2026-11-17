@@ -1,0 +1,7 @@
+# neofetch: native C system summary for ELKS, from astrobleem's elkslodge.
+# Nightly only: the repository has no releases of the packages themselves.
+DESC="System summary with PC, PCjr (--pcjr) and Tandy (--tandy) logos"
+GIT=https://github.com/astrobleem/elkslodge.git
+STABLE=no
+BUILD="make -C packages/neofetch ELKS_ROOT=$ELKS TOOLCHAIN=/usr"
+FILES="packages/neofetch/neofetch:/bin/neofetch"

@@ -1,0 +1,11 @@
+# fortune-extra: the computer fortunes, 250K of data kept out of the fortune
+# package to save disk space. Nothing to build.
+# Upstream calls the file "computers", which is 9 characters: FAT stores it as
+# "computer" and fortune then cannot find it. So it is installed as "computer"
+# and read with "fortune computer", which works on FAT and MINIX alike.
+DESC="1066 computer fortunes, read with 'fortune computer' (250K)"
+GIT=https://github.com/astrobleem/elkslodge.git
+STABLE=no
+BUILD=true
+FILES="packages/fortune/lib/fortune/computers:/usr/lib/fortune/computer
+packages/fortune/lib/fortune/computers.idx:/usr/lib/fortune/computer.idx"

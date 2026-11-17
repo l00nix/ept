@@ -1,0 +1,12 @@
+# cowsay: native C cowsay for ELKS, from astrobleem's elkslodge. Nightly only:
+# the repository has no releases of the packages themselves.
+# One program under four names; it picks cow or elk, speech or thought from
+# the name it is run as. GPL-3.0-or-later.
+DESC="Talking cow and elk: cowsay, cowthink, elksay, elkthink"
+GIT=https://github.com/astrobleem/elkslodge.git
+STABLE=no
+BUILD="make -C packages/cowsay ELKS_ROOT=$ELKS TOOLCHAIN=/usr"
+FILES="packages/cowsay/cowsay:/bin/cowsay
+packages/cowsay/cowthink:/bin/cowthink
+packages/cowsay/elksay:/bin/elksay
+packages/cowsay/elkthink:/bin/elkthink"
