@@ -6,12 +6,15 @@ A small package manager for [ELKS](https://github.com/ghaerr/elks). It downloads
 ```
 ept update                       fetch the package lists
 ept list [-n]                    show available and installed packages
+ept search [-n] [<text>]         find packages by name or description
 ept install [-n] [-r] <pkg> ...  install or repair packages
 ept upgrade [-y]                 update all installed packages
 ept remove <pkg> ...             remove packages
 ```
 
 `list`, `install` and `upgrade` fetch the package list first, so they never work from a stale one.
+
+`search` shows each package with its one line description, or only those with `<text>` in the name or description, in any case. Descriptions are fetched for `search` alone; a repository that has none just shows the names.
 
 `upgrade` shows what would change and asks first; `-y` skips the question.
 
@@ -44,7 +47,9 @@ Every `REPO=` line in `/etc/ept.cfg` is a repository, up to 8 of them; if the fi
 
 ```
 <repo>/index                    package list for tagged releases
+<repo>/desc                     package descriptions, one "name text" line each
 <repo>/pool/<name>/VERSION      version, one word
+<repo>/pool/<name>/DESC         description, one line (optional)
 <repo>/pool/<name>/<dest>       each file at its install path, e.g. pool/lua/bin/lua
 <repo>/nightly/...              same layout again for nightly builds
 ```
@@ -54,7 +59,7 @@ A project without tags only gets nightlies.
 Each index line is `name version md5 size mode dest`; the file starts with `#ept1` and ends with `#end`. A `#min <version>` line names the oldest `ept` that can use the repository: an older one installs the `ept` package and starts again before it installs anything else. The version comes from `MINEPT` in `server/eptrepo`. `server/eptrepo` maintains it:
 
 ```
-eptrepo add [-s] <repo> <name> <version> <file> <dest> [<file> <dest> ...]
+eptrepo add [-s] [-d <text>] <repo> <name> <version> <file> <dest> [<file> <dest> ...]
 eptrepo index <repo>
 ```
 
@@ -62,7 +67,9 @@ If `<file>` is a directory, everything in it is added below `<dest>`, so a whole
 
 A package is refused, and the old one left as it was, if it has files that cannot be published: symlinks to something that is not in the package, or names with characters other than letters, digits and `. _ + -`. With `-s` (`SKIP=yes` in a recipe) those files are reported and skipped instead.
 
-`eptrepo index` builds the list from whatever is in `pool/`, so a package can also be maintained by hand: copy the files to `pool/<name>/`, write `pool/<name>/VERSION`, and run `eptrepo index <repo>`.
+`-d` (`DESC="..."` in a recipe) sets the description that `ept search` shows; keep it under 65 characters so it fits on a line. Without `-d` a package keeps the description it had.
+
+`eptrepo index` builds the list from whatever is in `pool/`, so a package can also be maintained by hand: copy the files to `pool/<name>/`, write `pool/<name>/VERSION` (and `DESC` if you like), and run `eptrepo index <repo>`.
 
 ### License
 
