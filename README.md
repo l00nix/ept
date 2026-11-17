@@ -26,11 +26,11 @@ A new version of a package only downloads the files that changed. `ept` goes by 
 - State: `/etc/ept/index` and `/etc/ept/nindex` are the package lists (`index.1`, `nindex.1` and so on for extra repositories), `/etc/ept/inst` records what is installed.
 - Networking must be up first (`net start`).
 
-Every download is checked against the size and MD5 in the package list before it replaces anything. **ELKS has no TLS, so this catches corruption, not tampering.**
+Every download is checked against the size and MD5 in the package list before it replaces anything. **ELKS has no TLS, so this catches corruption, not tampering.** If an install stops partway, the files fetched so far stay in place; run the same `ept install` again to finish it.
 
 ### Repositories
 
-Every `REPO=` line in `/etc/ept.cfg` is a repository, up to 8 of them; if the file does not exist, `ept` creates it on its first run with the contents of [`ept.cfg`](ept.cfg). Without a `REPO=` line in it, `http://ept.samwarr.dev` is used.
+Every `REPO=` line in `/etc/ept.cfg` is a repository, up to 8 of them; if the file does not exist, `ept` creates it with the contents of [`ept.cfg`](ept.cfg) the first time it runs a command (`ept` on its own only prints the usage). Without a `REPO=` line in it, `http://ept.samwarr.dev` is used.
 
 **Every repository you list can install and replace files anywhere on the system, so only add ones you trust.**
 
@@ -64,3 +64,6 @@ A package is refused, and the old one left as it was, if it has files that canno
 
 `eptrepo index` builds the list from whatever is in `pool/`, so a package can also be maintained by hand: copy the files to `pool/<name>/`, write `pool/<name>/VERSION`, and run `eptrepo index <repo>`.
 
+### License
+
+MIT, see [LICENSE](LICENSE). `md5.c` is public domain.
