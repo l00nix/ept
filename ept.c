@@ -7,6 +7,7 @@
  * Installs and updates programs from a plain HTTP package repository.
  *
  * Index line:      name version md5 size mode dest
+ * Description:     name text...        (in <repo>/desc, only read by search)
  * Installed line:  name version md5 dest channel       (channel is s or n)
  * File URL:        <repo>/pool/<name><dest>
  *
@@ -35,7 +36,7 @@
 
 #include "md5.c"                /* md5_t, md5_init/update/final, readbuf[BUFSIZ] */
 
-#define VERSION     "1.5"
+#define VERSION     "1.7"
 #define SELF        "/bin/ept"
 #define DEFREPO     "http://ept.samwarr.dev"
 #define CONFIG      "/etc/ept.cfg"
@@ -46,6 +47,7 @@
 #define NINDEXNEW   DIR "/nindex.new"
 #define DB          DIR "/inst"
 #define DBNEW       DIR "/inst.new"
+#define DESC        DIR "/desc"     /* descriptions of one repository, while searching */
 
 #define LINESZ      256
 #define STALL       10          /* seconds without data before a download is retried */
@@ -99,6 +101,7 @@ static void usage(void)
         "ept " VERSION " - ELKS Package Tool\n"
         "Usage: ept update                       fetch the package lists\n"
         "       ept list [-n]                    show available and installed packages\n"
+        "       ept search [-n] [<text>]         find packages by name or description\n"
         "       ept install [-n] [-r] <pkg> ...  install or repair packages\n"
         "       ept upgrade [-y]                 update all installed packages\n"
         "       ept remove <pkg> ...             remove packages\n"
@@ -1084,6 +1087,86 @@ static int list(int c)
     return 0;
 }
 
+/* is needle somewhere in hay, in any case? */
+static int has(const char *hay, const char *needle)
+{
+    int n = strlen(needle);
+
+    for (; *hay; hay++)
+        if (!strncasecmp(hay, needle, n))
+            return 1;
+    return n == 0;
+}
+
+/* the description of a package in the fetched DESC file, "" if it has none; uses tmp */
+static char *getdesc(const char *name)
+{
+    FILE *fp;
+    int n = strlen(name);
+
+    if ((fp = fopen(DESC, "r")) != NULL) {
+        while (fgets(tmp, sizeof(tmp), fp))
+            if (!strncmp(tmp, name, n) && tmp[n] == ' ') {
+                fclose(fp);
+                chomp(tmp);
+                return tmp + n + 1;
+            }
+        fclose(fp);
+    }
+    return "";
+}
+
+/* show the packages of channel c with text in their name or description */
+static int search(const char *text, int c)
+{
+    FILE *ix;
+    char *f[NIDX];
+    char prev[64], sum[33];
+    char *d;
+    long size;
+    int i, n = 0;
+
+    if (fetchall(c) != 0)
+        return 1;
+    for (i = 0; i < nrepo; i++) {
+        if (!(live[c] & (1 << i)))
+            continue;
+        userepo(i);
+        chan = c;
+        /* a repository without descriptions still has names to search */
+        sprintf(sline, "%s/desc", CHANDIR);
+        quiet = 1;
+        http_get(sline, DESC, sum, &size, 0);
+        quiet = 0;
+        if ((ix = fopen(IDX, "r")) == NULL)
+            continue;
+        prev[0] = '\0';
+        while (fgets(iline, sizeof(iline), ix)) {
+            if (iline[0] == '#' || split(iline, f, NIDX) != NIDX || !strcmp(f[0], prev))
+                continue;
+            strncpy(prev, f[0], sizeof(prev) - 1);
+            prev[sizeof(prev) - 1] = '\0';
+            if (findrepo(prev) != i)            /* another repository overrides it */
+                continue;
+            d = getdesc(prev);
+            if (!has(prev, text) && !has(d, text))
+                continue;
+            if (*d)
+                printf("%-14s %.64s\n", prev, d);
+            else
+                printf("%s\n", prev);
+            n++;
+        }
+        fclose(ix);
+    }
+    unlink(DESC);
+    if (n == 0) {
+        fprintf(stderr, "ept: no package matches '%s'\n", text);
+        return 1;
+    }
+    return 0;
+}
+
 int main(int argc, char **argv)
 {
     int i, rc = 0, nightly = 0, yes = 0;
@@ -1116,6 +1199,8 @@ int main(int argc, char **argv)
     }
     if (!strcmp(cmd, "list"))
         return list(nightly);
+    if (!strcmp(cmd, "search"))
+        return search(argc > 2 ? argv[2] : "", nightly);
     if (!strcmp(cmd, "install"))
         return install(argc - 2, argv + 2, nightly);
     if (!strcmp(cmd, "upgrade"))
