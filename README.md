@@ -12,7 +12,7 @@ ept upgrade [-y]                 update all installed packages
 ept remove <pkg> ...             remove packages
 ```
 
-`list`, `install` and `upgrade` fetch the package list first, so they never work from a stale one.
+`list`, `install` and `upgrade` fetch the package list first, so they never work from a stale one. Whenever a list is fetched, packages that were not in the previous one are announced with a `New package:` line each.
 
 `search` shows each package with its one line description, or only those with `<text>` in the name or description, in any case. Descriptions are fetched for `search` alone; a repository that has none just shows the names.
 
