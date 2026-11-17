@@ -36,7 +36,7 @@
 
 #include "md5.c"                /* md5_t, md5_init/update/final, readbuf[BUFSIZ] */
 
-#define VERSION     "1.8"
+#define VERSION     "1.9"
 #define SELF        "/bin/ept"
 #define DEFREPO     "http://ept.samwarr.dev"
 #define CONFIG      "/etc/ept.cfg"
