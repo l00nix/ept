@@ -536,6 +536,51 @@ static int findrepo(const char *pkg)
  * Fetch the package list of channel c from the current repository:
  * 0 ok, 1 failed, 2 the repository has no nightly builds
  */
+/*
+ * Is the package in the saved list? Both lists are normally in the same
+ * order, so the search goes on from where the last one ended and only
+ * starts over when it reaches the end.
+ */
+static int inold(FILE *old, const char *name)
+{
+    int pass, n = strlen(name);
+
+    for (pass = 0; pass < 2; pass++) {
+        while (fgets(sline, sizeof(sline), old))
+            if (strncmp(sline, name, n) == 0 && sline[n] == ' ')
+                return 1;
+        rewind(old);
+    }
+    return 0;
+}
+
+/* Name the packages of the list just fetched that the saved one does not have */
+static void newpkgs(void)
+{
+    FILE *new, *old;
+    char prev[64];
+    char *p;
+
+    if ((old = fopen(IDX, "r")) == NULL)
+        return;                             /* first list from this repository */
+    if ((new = fopen(IDXNEW, "r")) != NULL) {
+        prev[0] = '\0';
+        while (fgets(iline, sizeof(iline), new)) {
+            if (iline[0] == '#' || (p = strchr(iline, ' ')) == NULL)
+                continue;
+            *p = '\0';
+            if (!strcmp(iline, prev))
+                continue;
+            strncpy(prev, iline, sizeof(prev) - 1);
+            prev[sizeof(prev) - 1] = '\0';
+            if (!inold(old, iline))
+                printf("New package: %s%s\n", iline, chan ? " (nightly)" : "");
+        }
+        fclose(new);
+    }
+    fclose(old);
+}
+
 static int update(int c)
 {
     FILE *fp;
@@ -576,6 +621,7 @@ static int update(int c)
         fprintf(stderr, "ept: server did not return a valid package list\n");
         return 1;
     }
+    newpkgs();
     if (replace(IDXNEW, IDX) != 0)
         return 1;
     return 0;
