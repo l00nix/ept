@@ -28,7 +28,7 @@ Every download is checked against the size and MD5 in the package list before it
 
 ### Repositories
 
-Every `REPO=` line in `/etc/ept.cfg` is a repository, up to 8 of them; [`ept.cfg`](ept.cfg) is a starting point. Without the file, or without a `REPO=` line in it, `http://ept.samwarr.dev` is used.
+Every `REPO=` line in `/etc/ept.cfg` is a repository, up to 8 of them; if the file does not exist, `ept` creates it on its first run with the contents of [`ept.cfg`](ept.cfg). Without a `REPO=` line in it, `http://ept.samwarr.dev` is used.
 
 **Every repository you list can install and replace files anywhere on the system, so only add ones you trust.**
 

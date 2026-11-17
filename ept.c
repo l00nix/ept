@@ -186,6 +186,19 @@ static void read_config(void)
             userepo(nrepo++);           /* stops here if the URL is no good */
         }
         fclose(fp);
+    } else if ((fp = fopen(CONFIG, "w")) != NULL) {
+        /* first run: leave a file to edit, the same as ept.cfg in the source */
+        fputs("# " CONFIG " - ept repositories, one REPO= line each.\n"
+            "#\n"
+            "# WARNING: every repository listed here can install and replace\n"
+            "# files anywhere on this system. Only add repositories you trust.\n"
+            "#\n"
+            "# The FIRST repository is the primary: it is the only one that can\n"
+            "# update ept itself. Add extra repositories BELOW it; for any other\n"
+            "# package, a later line overrides an earlier one.\n"
+            "\n"
+            "REPO=" DEFREPO "\n", fp);
+        fclose(fp);
     }
     if (nrepo == 0)
         strcpy(repos[nrepo++], DEFREPO);
