@@ -1,0 +1,5 @@
+# fetch86: system information fetch for ELKS
+DESC="System information fetch with an ASCII logo"
+GIT=https://github.com/sammothxc/fetch86.git
+BUILD="make ELKS=$ELKS"
+FILES="fetch86:/bin/fetch86"
