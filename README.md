@@ -4,16 +4,18 @@ A small package manager for [ELKS](https://github.com/ghaerr/elks). It downloads
 
 ### Usage
 ```
-ept update                  fetch the package lists
-ept list [-n]               show available and installed packages
-ept install [-n] <pkg> ...  install or reinstall packages
-ept upgrade [-y]            update all installed packages
-ept remove <pkg> ...        remove packages
+ept update                       fetch the package lists
+ept list [-n]                    show available and installed packages
+ept install [-n] [-r] <pkg> ...  install or repair packages
+ept upgrade [-y]                 update all installed packages
+ept remove <pkg> ...             remove packages
 ```
 
 `list`, `install` and `upgrade` fetch the package list first, so they never work from a stale one.
 
 `upgrade` shows what would change and asks first; `-y` skips the question.
+
+A new version of a package only downloads the files that changed. `ept` goes by its record of what it installed, so a file that was damaged or replaced afterwards is not noticed. `install -r` repairs that: it checks the size and MD5 of every file of the package on disk and downloads the ones that differ or are missing.
 
 `-n` uses the nightly builds instead of the tagged releases. A package installed with `-n` stays on the nightly channel for `ept upgrade` until it is installed again without `-n`.
 
