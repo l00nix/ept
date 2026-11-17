@@ -69,6 +69,7 @@ static int nrepo;
 static int repo;                /* the repository host, port and base are set for */
 static unsigned char live[2];   /* per channel: repositories with a usable package list */
 static char idxname[sizeof(NINDEX) + 4];
+static int repair;              /* install -r: trust the files on disk, not the installed list */
 static int quiet;               /* a 404 is no error: this repository has no such list */
 static int notfound;            /* the last reply was a 404 */
 static char **args;             /* argv as given, to start ept again */
@@ -96,12 +97,13 @@ static void usage(void)
 {
     fprintf(stderr,
         "ept " VERSION " - ELKS Package Tool\n"
-        "Usage: ept update                  fetch the package lists\n"
-        "       ept list [-n]               show available and installed packages\n"
-        "       ept install [-n] <pkg> ...  install or reinstall packages\n"
-        "       ept upgrade [-y]            update all installed packages\n"
-        "       ept remove <pkg> ...        remove packages\n"
+        "Usage: ept update                       fetch the package lists\n"
+        "       ept list [-n]                    show available and installed packages\n"
+        "       ept install [-n] [-r] <pkg> ...  install or repair packages\n"
+        "       ept upgrade [-y]                 update all installed packages\n"
+        "       ept remove <pkg> ...             remove packages\n"
         "  -n   use the nightly builds instead of the tagged releases\n"
+        "  -r   check every file on disk and fetch those that differ again\n"
         "  -y   do not ask before upgrading\n");
     exit(1);
 }
@@ -451,8 +453,8 @@ static void mkdirs(char *path)
     }
 }
 
-/* is this exact file record in the installed list? */
-static int isinst(char *name, char *ver, char *sum, char *dest)
+/* is this file of the package in the installed list with the same contents, at any version? */
+static int isinst(char *name, char *sum, char *dest)
 {
     FILE *fp;
     char *f[NDB];
@@ -462,7 +464,7 @@ static int isinst(char *name, char *ver, char *sum, char *dest)
         return 0;
     while (!found && fgets(sline, sizeof(sline), fp))
         if (split(sline, f, NDB) == NDB && !strcmp(f[3], dest) && !strcmp(f[0], name)
-                && !strcmp(f[1], ver) && !strcmp(f[2], sum))
+                && !strcmp(f[2], sum))
             found = 1;
     fclose(fp);
     return found;
@@ -684,6 +686,31 @@ static int pending(void)
     return n;
 }
 
+/* does the file at path have this size and md5? */
+static int intact(const char *path, const char *sum, long size)
+{
+    struct stat st;
+    unsigned char digest[16];
+    char hex[33];
+    md5_t ctx;
+    int fd, n, i;
+
+    if (stat(path, &st) != 0 || (long)st.st_size != size)
+        return 0;
+    if ((fd = open(path, O_RDONLY)) < 0)
+        return 0;
+    md5_init(&ctx);
+    while ((n = read(fd, readbuf, sizeof(readbuf))) > 0)
+        md5_update(&ctx, readbuf, n);
+    close(fd);
+    if (n < 0)
+        return 0;
+    md5_final(&ctx, digest);
+    for (i = 0; i < 16; i++)
+        sprintf(hex + i * 2, "%02x", digest[i]);
+    return !strcmp(hex, sum);
+}
+
 /* is p anything but an absolute path without empty, "." or ".." parts? */
 static int badpath(const char *p)
 {
@@ -771,8 +798,12 @@ static int ipkg(const char *pkg, int c)
             continue;
         strncpy(ver, f[1], sizeof(ver) - 1);
         ver[sizeof(ver) - 1] = '\0';
-        if (isinst(f[0], f[1], f[2], f[5]) && access(f[5], 0) == 0)
+        /* a file that did not change between versions is not fetched again */
+        if (repair ? intact(f[5], f[2], atol(f[3]))
+                : isinst(f[0], f[2], f[5]) && access(f[5], 0) == 0) {
+            chmod(f[5], (mode_t)strtol(f[4], NULL, 8));
             continue;
+        }
         if (!got)
             printf("Installing %s %s%s\n", pkg, ver, chan ? " (nightly)" : "");
         if (getfile(f) != 0) {
@@ -815,7 +846,7 @@ static int ipkg(const char *pkg, int c)
         return 1;
     }
     if (!got)
-        printf("%s %s is up to date\n", pkg, ver);
+        printf("%s %s is %s\n", pkg, ver, repair ? "intact" : "up to date");
     return 0;
 }
 
@@ -1055,15 +1086,22 @@ static int list(int c)
 
 int main(int argc, char **argv)
 {
-    int i, rc = 0, nightly = 0;
+    int i, rc = 0, nightly = 0, yes = 0;
     char *cmd;
 
     if (argc < 2)
         usage();
     args = argv;
     cmd = argv[1];
-    if (argc > 2 && !strcmp(argv[2], "-n")) {
-        nightly = 1;
+    while (argc > 2 && argv[2][0] == '-') {
+        if (!strcmp(argv[2], "-n"))
+            nightly = 1;
+        else if (!strcmp(argv[2], "-r"))
+            repair = 1;
+        else if (!strcmp(argv[2], "-y"))
+            yes = 1;
+        else
+            usage();
         argv++;
         argc--;
     }
@@ -1081,7 +1119,7 @@ int main(int argc, char **argv)
     if (!strcmp(cmd, "install"))
         return install(argc - 2, argv + 2, nightly);
     if (!strcmp(cmd, "upgrade"))
-        return upgrade(argc > 2 && !strcmp(argv[2], "-y"));
+        return upgrade(yes);
     if (!strcmp(cmd, "remove")) {
         if (argc < 3)
             usage();
