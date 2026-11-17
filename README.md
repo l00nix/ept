@@ -16,7 +16,7 @@ ept remove <pkg> ...             remove packages
 
 `search` shows each package with its one line description, or only those with `<text>` in the name or description, in any case. Descriptions are fetched for `search` alone; a repository that has none just shows the names.
 
-`upgrade` shows what would change and asks first; `-y` skips the question.
+`install` shows how many files and how much it has to download for each package and asks first, and `upgrade` does the same with what would change; `-y` skips the question. Nothing is asked when there is nothing to download, or for `install -r`.
 
 A new version of a package only downloads the files that changed. `ept` goes by its record of what it installed, so a file that was damaged or replaced afterwards is not noticed. `install -r` repairs that: it checks the size and MD5 of every file of the package on disk and downloads the ones that differ or are missing.
 
