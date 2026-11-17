@@ -1,0 +1,10 @@
+# Native system information for ELKS / 8086; logos are embedded.
+# Version 0.1 is still a draft release, so publish nightlies only.
+# /bin/elksfetch uses the full name supported by MINIX filesystems.
+DESC="Native ELKS system-information utility"
+GIT=https://github.com/l00nix/elksfetch.git
+STABLE=no
+BUILD="ELKSFETCH_ELKS=$ELKS sh toolchain/build-external.sh"
+FILES="build/elksfetch:/bin/elksfetch
+README.md:/lib/elksfetch/readme
+LICENSE:/lib/elksfetch/license"
