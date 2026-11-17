@@ -1,4 +1,5 @@
 # ept itself so that `ept upgrade` can update the package tool
+DESC="ELKS Package Tool, this package manager"
 GIT=https://github.com/sammothxc/ept.git
 BUILD="make"
 FILES="ept:/bin/ept"
