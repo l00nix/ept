@@ -107,7 +107,7 @@ static void usage(void)
         "       ept remove <pkg> ...             remove packages\n"
         "  -n   use the nightly builds instead of the tagged releases\n"
         "  -r   check every file on disk and fetch those that differ again\n"
-        "  -y   do not ask before upgrading\n");
+        "  -y   do not ask before installing or upgrading\n");
     exit(1);
 }
 
@@ -643,11 +643,14 @@ static int pending(void)
             chan = d[4][0] == 'n';
             if (findrepo(d[0]) < 0 || (ix = fopen(IDX, "r")) == NULL)
                 continue;
-            /* the lines of a package follow each other: version and total size */
+            /*
+             * The lines of a package follow each other: its version, and the
+             * size of the files that changed. isinst uses sline, hence iline.
+             */
             found = 0;
             size = 0;
-            while (fgets(sline, sizeof(sline), ix)) {
-                if (split(sline, f, NIDX) != NIDX || strcmp(f[0], d[0]) != 0) {
+            while (fgets(iline, sizeof(iline), ix)) {
+                if (split(iline, f, NIDX) != NIDX || strcmp(f[0], d[0]) != 0) {
                     if (found)
                         break;
                     continue;
@@ -657,7 +660,9 @@ static int pending(void)
                     ver[sizeof(ver) - 1] = '\0';
                     found = 1;
                 }
-                size += atol(f[3]);
+                /* only worth checking the files of a package that has an update */
+                if (strcmp(ver, d[1]) != 0 && (!isinst(f[0], f[2], f[5]) || access(f[5], 0) != 0))
+                    size += atol(f[3]);
             }
             fclose(ix);
             if (found && strcmp(ver, d[1]) != 0) {
@@ -684,7 +689,7 @@ static int pending(void)
         printf("%d package update%s available", n, n == 1 ? "" : "s");
         if (nn)
             printf(" (%d nightly)", nn);
-        printf(", up to %ldK to download\n", KB(total));
+        printf(", %ldK to download\n", KB(total));
     }
     return n;
 }
@@ -923,15 +928,56 @@ static void selfupdate(int c)
     }
 }
 
-static int install(int argc, char **argv, int c)
+/* ask a yes/no question on the terminal; just Enter is a yes */
+static int confirm(const char *what)
 {
-    int i, rc = 0;
+    printf("%s? [Y/n] ", what);
+    fflush(stdout);
+    return fgets(tmp, sizeof(tmp), stdin) != NULL
+        && (tmp[0] == 'y' || tmp[0] == 'Y' || tmp[0] == '\n');
+}
+
+static int install(int argc, char **argv, int c, int yes)
+{
+    FILE *ix;
+    char *f[NIDX];
+    long size, total = 0;
+    int i, n, npkg = 0, rc = 0;
 
     if (argc < 1)
         usage();
     if (fetchall(c) != 0)               /* never install from a stale list */
         return 1;
     selfupdate(c);
+
+    /* show what there is to download; a repair has to read every file to know */
+    for (i = 0; i < argc && !repair; i++) {
+        chan = c;
+        if (findrepo(argv[i]) < 0 || (ix = fopen(IDX, "r")) == NULL)
+            continue;
+        n = 0;
+        size = 0;
+        while (fgets(iline, sizeof(iline), ix)) {
+            if (split(iline, f, NIDX) != NIDX || strcmp(f[0], argv[i]) != 0)
+                continue;
+            if (isinst(f[0], f[2], f[5]) && access(f[5], 0) == 0)
+                continue;
+            n++;
+            size += atol(f[3]);
+        }
+        fclose(ix);
+        if (n) {
+            printf("  %-14s %d file%s, %ldK\n", argv[i], n, n == 1 ? "" : "s", KB(size));
+            total += size;
+            npkg++;
+        }
+    }
+    if (npkg > 1)
+        printf("%d packages, %ldK to download\n", npkg, KB(total));
+    if (npkg && !yes && !confirm("Install")) {
+        printf("Nothing installed\n");
+        return 0;
+    }
     for (i = 0; i < argc; i++) {
         switch (ipkg(argv[i], c)) {
         case 1:
@@ -962,14 +1008,9 @@ static int upgrade(int yes)
     }
     if (pending() == 0)
         return 0;
-    if (!yes) {
-        printf("Upgrade? [Y/n] ");
-        fflush(stdout);
-        if (fgets(tmp, sizeof(tmp), stdin) == NULL
-                || (tmp[0] != 'y' && tmp[0] != 'Y' && tmp[0] != '\n')) {
-            printf("Nothing upgraded\n");
-            return 0;
-        }
+    if (!yes && !confirm("Upgrade")) {
+        printf("Nothing upgraded\n");
+        return 0;
     }
     for (p = names; *p; p += strlen(p) + 1)
         if (ipkg(p + 1, *p == 'n') != 0)
@@ -1202,7 +1243,7 @@ int main(int argc, char **argv)
     if (!strcmp(cmd, "search"))
         return search(argc > 2 ? argv[2] : "", nightly);
     if (!strcmp(cmd, "install"))
-        return install(argc - 2, argv + 2, nightly);
+        return install(argc - 2, argv + 2, nightly, yes);
     if (!strcmp(cmd, "upgrade"))
         return upgrade(yes);
     if (!strcmp(cmd, "remove")) {
