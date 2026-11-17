@@ -1,0 +1,13 @@
+# PicoMEM configuration and diagnostic tools for ELKS / 8086.
+# Development builds only. Requires a supported PicoMEM board/firmware profile.
+# Keep legacy /bin/pmcfg; omit kernel, firmware, storage/mouse drivers and boot files.
+DESC="PicoMEM configuration and diagnostic tools"
+GIT=https://github.com/l00nix/picomem-elks.git
+STABLE=no
+BUILD="TOPDIR=$ELKS sh build.sh"
+FILES="build/pmconfig:/bin/pmconfig
+build/pmdump:/bin/pmdump
+build/pmstat:/bin/pmstat
+build/pmmem:/bin/pmmem
+COPYING:/lib/picomem/license
+README.md:/lib/picomem/readme"
