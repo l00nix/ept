@@ -10,6 +10,7 @@
 #   BUILD   command that builds it, run in the checkout
 #   FILES   "built-file:/install/path ..." pairs; a directory on the left
 #           installs everything in it below the path, e.g. "include:/usr/include"
+#   DESC    (optional) one line description, shown by "ept search"
 #   BRANCH  (optional) branch nightlies are built from, default: remote HEAD
 #   STABLE  (optional) set to "no" to publish nightlies only and ignore tags
 #   SKIP    (optional) set to "yes" to leave out files of a FILES directory that
@@ -125,15 +126,15 @@ build_one()
 		args+=("$src/${pair%%:*}" "${pair#*:}")
 	done
 	mkdir -p "$repo"
-	eptrepo add ${SKIP:+-s} "$repo" "$name" "$version" "${args[@]}" && log "$name $version published to $repo"
+	eptrepo add ${SKIP:+-s} ${DESC:+-d "$DESC"} "$repo" "$name" "$version" "${args[@]}" && log "$name $version published to $repo"
 }
 
 # build_recipe <file> [force]
 build_recipe()
 {
-	local recipe=$1 force=$2 name src tag head version
+	local recipe=$1 force=$2 name src tag head version dir
 	name=$(basename "$recipe" .pkg)
-	GIT= BUILD= FILES= BRANCH= STABLE= SKIP=
+	GIT= BUILD= FILES= BRANCH= STABLE= SKIP= DESC=
 	. "$recipe"
 	[ "$SKIP" = yes ] || SKIP=
 	if [ -z "$GIT" ] || [ -z "$BUILD" ] || [ -z "$FILES" ]; then
@@ -166,6 +167,16 @@ build_recipe()
 	if [ -n "$force" ] || [ "$(cat "$REPO/nightly/pool/$name/VERSION" 2>/dev/null)" != "$version" ]; then
 		build_one "$name" "$head" "$version" "$REPO/nightly"
 	fi
+
+	# a description can change without a new build; build_all makes the lists after this
+	for dir in "$REPO/pool/$name" "$REPO/nightly/pool/$name"; do
+		[ -d "$dir" ] || continue
+		if [ -n "$DESC" ]; then
+			echo "$DESC" > "$dir/DESC"
+		else
+			rm -f "$dir/DESC"
+		fi
+	done
 }
 
 build_all()
