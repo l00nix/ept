@@ -1,11 +1,9 @@
 # elksweb: graphical web browser for ELKS
 DESC="Graphical web browser"
 GIT=https://github.com/l00nix/ELKSWeb.git
-# Track 0.5 development builds; main remains the frozen 0.4 baseline.
-BRANCH=dev/0.5
-# Do not promote 0.5 development tags to the stable catalogue.
-# Existing stable packages remain available; revisit this at promotion.
-STABLE=no
+# 0.5 is released on main; keep development tags out of the stable catalogue.
+BRANCH=main
+STABLE_TAG=v0.5
 BUILD="ELKSWEB_ELKS=$ELKS sh toolchain/build-external.sh"
 FILES="build/elksweb:/bin/elksweb
 share/welcome.htm:/lib/elksweb/welcome.htm
