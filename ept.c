@@ -266,20 +266,24 @@ static int meter(long got, long size, int last)
     return v;
 }
 
+static md5_t ctx;                   /* md5 of a download, kept when it resumes */
+
 /*
  * GET <repo><rpath> into outfile. On success returns 0 and sets *size and the
  * hex md5 of the body. Anything but a complete HTTP 200 reply is an error.
- * Returns -2 when the server went quiet, which is worth another attempt.
- * expect is the size from the index, for the progress bar; 0 if unknown.
+ * expect is the size from the index, for the progress bar and to notice a
+ * connection that ends early; 0 if unknown. Returns -2 when the server went
+ * quiet or the connection ended early, which is worth another attempt: then
+ * outfile is kept and *size is how much of it arrived, and from = *size
+ * asks for the rest of the file on the next attempt.
  */
 static int http_try(const char *rpath, const char *outfile, char *hexsum, long *size,
-    long expect)
+    long expect, long from)
 {
     int fd, out, n, i, hdr = 1, nl = 0, slen = 0, rc = -1, shown = -1;
-    long total = 0;
+    long total = from;
     char status[13];
     unsigned char digest[16];
-    md5_t ctx;
     char *req = (char *)readbuf;
 
     if (strlen(base) + strlen(rpath) + strlen(host) > 400) {
@@ -298,20 +302,24 @@ static int http_try(const char *rpath, const char *outfile, char *hexsum, long *
         sprintf(req, "GET %s%s HTTP/1.0\r\nHost: %s\r\n", base, rpath, host);
     else
         sprintf(req, "GET %s%s HTTP/1.0\r\nHost: %s:%d\r\n", base, rpath, host, port);
+    if (from)
+        sprintf(req + strlen(req), "Range: bytes=%ld-\r\n", from);
     strcat(req, "User-Agent: ept/" VERSION "\r\nConnection: close\r\n\r\n");
     n = strlen(req);
     if (write(fd, req, n) != n) {
         fprintf(stderr, "ept: send failed\n");
         close(fd);
+        unlink(outfile);
         return -1;
     }
-    out = open(outfile, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    out = open(outfile, from ? O_WRONLY | O_APPEND : O_WRONLY | O_CREAT | O_TRUNC, 0644);
     if (out < 0) {
         perror(outfile);
         close(fd);
         return -1;
     }
-    md5_init(&ctx);
+    if (!from)
+        md5_init(&ctx);
     for (;;) {
         fd_set rfds;
         struct timeval tv;
@@ -325,7 +333,7 @@ static int http_try(const char *rpath, const char *outfile, char *hexsum, long *
                 write(STDOUT_FILENO, "\n", 1);
             fprintf(stderr, "ept: no data from server for %d seconds\n", STALL);
             rc = -2;
-            goto done;
+            goto early;
         }
         n = read(fd, readbuf, sizeof(readbuf));
         if (n <= 0)
@@ -346,7 +354,19 @@ static int http_try(const char *rpath, const char *outfile, char *hexsum, long *
             }
             if (!hdr) {
                 status[slen] = '\0';
-                if (strncmp(status, "HTTP/1.", 7) != 0 || strncmp(status + 9, "200", 3) != 0) {
+                if (from && !strncmp(status, "HTTP/1.", 7) && !strncmp(status + 9, "200", 3)) {
+                    /* the server sent the whole file instead of the rest: start over */
+                    close(out);
+                    if ((out = open(outfile, O_WRONLY | O_TRUNC)) < 0) {
+                        perror(outfile);
+                        close(fd);
+                        unlink(outfile);
+                        return -1;
+                    }
+                    md5_init(&ctx);
+                    total = from = 0;
+                } else if (strncmp(status, "HTTP/1.", 7) != 0 ||
+                        strncmp(status + 9, from ? "206" : "200", 3) != 0) {
                     status[12] = '\0';
                     notfound = slen >= 12 && !strncmp(status + 9, "404", 3);
                     if (!(notfound && quiet))
@@ -369,16 +389,29 @@ static int http_try(const char *rpath, const char *outfile, char *hexsum, long *
     }
     if (shown >= 0)
         write(STDOUT_FILENO, "\n", 1);
-    if (n < 0)
-        fprintf(stderr, "ept: read error from server\n");
-    else if (hdr)
+    if (hdr)
         fprintf(stderr, "ept: incomplete reply from server\n");
+    else if (expect > 0 && total < expect) {
+        /* the connection ended early (on a slow or lossy link, e.g. SLIP) */
+        fprintf(stderr, "ept: connection lost after %ld of %ld bytes\n", total, expect);
+        rc = -2;
+    } else if (n < 0)
+        fprintf(stderr, "ept: read error from server\n");
     else
         rc = 0;
+early:
+    /* what arrived is kept for the next attempt only when its size is known */
+    if (rc == -2 && expect <= 0)
+        rc = -3;
 done:
     close(fd);
     if (close(out) < 0)
         rc = -1;
+    *size = total;
+    if (rc == -2)
+        return rc;
+    if (rc == -3)
+        rc = -2;
     if (rc != 0) {
         unlink(outfile);
         return rc;
@@ -390,17 +423,33 @@ done:
     return 0;
 }
 
-/* http_try, started again on a new connection when a transfer stalls */
+/*
+ * http_try, started again on a new connection when a transfer stalls or ends
+ * early. A file of known size goes on from where it stopped, for as long as
+ * every attempt gets more of it; TRIES attempts in a row that get nothing
+ * more give up.
+ */
 static int http_get(const char *rpath, const char *outfile, char *hexsum, long *size,
     long expect)
 {
-    int rc, try;
+    int rc, try = 1;
+    long from = 0;
 
-    for (try = 1; ; try++) {
-        rc = http_try(rpath, outfile, hexsum, size, expect);
-        if (rc != -2 || try == TRIES)
+    for (;;) {
+        rc = http_try(rpath, outfile, hexsum, size, expect, from);
+        if (rc != -2)
             return rc;
-        fprintf(stderr, "ept: trying again (%d of %d)\n", try + 1, TRIES);
+        if (expect > 0 && *size > from) {
+            from = *size;
+            try = 1;
+            fprintf(stderr, "ept: resuming at %ldK\n", KB(from));
+            continue;
+        }
+        if (++try > TRIES) {
+            unlink(outfile);
+            return rc;
+        }
+        fprintf(stderr, "ept: trying again (%d of %d)\n", try, TRIES);
     }
 }
 

@@ -29,7 +29,7 @@ A new version of a package only downloads the files that changed. `ept` goes by 
 - State: `/etc/ept/index` and `/etc/ept/nindex` are the package lists (`index.1`, `nindex.1` and so on for extra repositories), `/etc/ept/inst` records what is installed.
 - Networking must be up first (`net start`).
 
-Every download is checked against the size and MD5 in the package list before it replaces anything. **ELKS has no TLS, so this catches corruption, not tampering.** If an install stops partway, the files fetched so far stay in place; run the same `ept install` again to finish it.
+Every download is checked against the size and MD5 in the package list before it replaces anything. **ELKS has no TLS, so this catches corruption, not tampering.** A download that stops partway, as happens on slow serial (SLIP) links, is resumed from where it stopped for as long as each attempt gets further; it gives up after 3 attempts in a row that get nothing more. If an install stops partway, the files fetched so far stay in place; run the same `ept install` again to finish it.
 
 ### Repositories
 
