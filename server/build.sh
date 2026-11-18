@@ -13,6 +13,7 @@
 #   DESC    (optional) one line description, shown by "ept search"
 #   BRANCH  (optional) branch nightlies are built from, default: remote HEAD
 #   STABLE  (optional) set to "no" to publish nightlies only and ignore tags
+#   STABLE_TAG (optional) exact release tag to build instead of the newest tag
 #   SKIP    (optional) set to "yes" to leave out files of a FILES directory that
 #           cannot be published (e.g. dangling symlinks) instead of failing
 #
@@ -134,7 +135,7 @@ build_recipe()
 {
 	local recipe=$1 force=$2 name src tag head version dir
 	name=$(basename "$recipe" .pkg)
-	GIT= BUILD= FILES= BRANCH= STABLE= SKIP= DESC=
+	GIT= BUILD= FILES= BRANCH= STABLE= STABLE_TAG= SKIP= DESC=
 	. "$recipe"
 	[ "$SKIP" = yes ] || SKIP=
 	if [ -z "$GIT" ] || [ -z "$BUILD" ] || [ -z "$FILES" ]; then
@@ -150,6 +151,13 @@ build_recipe()
 
 	# stable: newest tag (versionsort.suffix makes v0.3 newer than v0.3-dev1)
 	tag=$(git -C "$src" -c versionsort.suffix=- tag --sort=-v:refname | head -1)
+	if [ "$STABLE" != no ] && [ -n "$STABLE_TAG" ]; then
+		git -C "$src" rev-parse --verify --quiet "refs/tags/$STABLE_TAG^{commit}" >/dev/null || {
+			log "ERROR: $name: stable tag $STABLE_TAG does not exist"
+			return 1
+		}
+		tag=$STABLE_TAG
+	fi
 	if [ "$STABLE" = no ]; then
 		:
 	elif [ -n "$tag" ]; then
