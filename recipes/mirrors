@@ -1,0 +1,3 @@
+# Other ept repositories, listed on the home page that "eptrepo html" writes.
+# One per line: <url> <description>. The build loop only reads *.pkg files.
+http://ept.8088retro.com Independent repository with hand-picked, pinned builds, maintained by l00nix

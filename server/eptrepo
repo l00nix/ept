@@ -13,7 +13,7 @@
 # Usage:
 #   eptrepo add [-s] [-d <text>] <repo> <name> <version> <file> <dest> ...
 #   eptrepo index <repo>
-#   eptrepo html <repo>
+#   eptrepo html <repo> [<mirrors>]
 #
 # If <file> is a directory, everything in it is added below <dest>,
 # e.g. "include /usr/include" or "target /". A symlink is published as a
@@ -26,7 +26,8 @@
 # package keeps the description it had.
 # html writes <repo>/index.html, a home page with instructions and the
 # packages of <repo> and <repo>/nightly. EPT_URL is the address it gives for
-# the repository, default http://ept.samwarr.dev.
+# the repository, default http://ept.samwarr.dev. <mirrors> lists other
+# repositories for the page, one "<url> <description>" line each.
 
 set -e
 
@@ -37,7 +38,7 @@ MINEPT=1.8
 
 usage()
 {
-	sed -n '2,29p' "$0" | sed 's/^# \{0,1\}//'
+	sed -n '2,31p' "$0" | sed 's/^# \{0,1\}//'
 	exit 1
 }
 
@@ -230,8 +231,9 @@ add()
 # old browsers (ELKSWeb, Lynx) can show; the style block is only a nicety.
 html()
 {
-	repo=$1
+	repo=$1 mirrors=${2:-/dev/null}
 	[ -f "$repo/index" ] || die "$repo/index: no package list, run eptrepo index first"
+	[ -f "$mirrors" ] || mirrors=/dev/null
 	url=${EPT_URL:-http://ept.samwarr.dev}
 	sdesc=/dev/null nindex=/dev/null ndesc=/dev/null
 	if [ -f "$repo/desc" ]; then sdesc=$repo/desc; fi
@@ -362,6 +364,24 @@ The first is the primary, and only it can update ept itself. For any other packa
 later line overrides an earlier one, so add extra repositories below the primary.
 <b>Every repository you list can install and replace files anywhere on your system,
 so only add ones you trust.</b></p>
+<p>Other repositories are run independently and may carry different or older builds of
+the same packages. ept installs the version a repository lists, even an older one, so a
+repository made primary can also replace ept itself with an older version.</p>
+EOF
+	# the other repositories, leaving out this one
+	awk -v self="$url" '
+	BEGIN { sub(/\/+$/, "", self) }
+	function esc(s) { gsub(/&/, "\\&amp;", s); gsub(/</, "\\&lt;", s); gsub(/>/, "\\&gt;", s); gsub(/"/, "\\&quot;", s); return s }
+	/^[ \t]*(#|$)/ { next }
+	{
+		u = $1; sub(/\/+$/, "", u)
+		if (u == self || u !~ /^http:\/\//) next
+		d = $0; sub(/^[ \t]*[^ \t]+[ \t]*/, "", d)
+		if (!n++) print "<p>Known repositories:</p>\n<ul>"
+		printf "<li><a href=\"%s\">%s</a>%s</li>\n", esc(u), esc(u), d == "" ? "" : " - " esc(d)
+	}
+	END { if (n) print "</ul>" }' "$mirrors"
+	cat <<EOF
 
 <h2>Adding a package</h2>
 <p>Packages are built from source by the repository's build server. To add one, open a
@@ -387,6 +407,6 @@ EOF
 case "$1" in
 add)	shift; add "$@";;
 index)	[ $# -eq 2 ] || usage; index "$2";;
-html)	[ $# -eq 2 ] || usage; html "$2";;
+html)	[ $# -eq 2 ] || [ $# -eq 3 ] || usage; html "$2" "$3";;
 *)	usage;;
 esac
