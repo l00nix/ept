@@ -362,7 +362,11 @@ static int get(const char *rpath, int fd, long size, const char *sum)
     /* look the host up once: ELKS asks DNS over TCP, and ktcp has room for
      * only a few connections at a time, closed ones included for a while */
     if (!RIP)
+#ifdef TINY
         RIP = resolve(RHOST);
+#else
+        RIP = *RHOST >= '0' && *RHOST <= '9' ? in_aton(RHOST) : resolve(RHOST);
+#endif
     if (!(a.sin_addr.s_addr = RIP)
             || in_connect(s, (struct sockaddr *)&a, sizeof(a), 10) < 0)
         goto done;
