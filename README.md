@@ -61,6 +61,7 @@ Each index line is `name version md5 size mode dest`; the file starts with `#ept
 ```
 eptrepo add [-s] [-d <text>] <repo> <name> <version> <file> <dest> [<file> <dest> ...]
 eptrepo index <repo>
+eptrepo html <repo>
 ```
 
 If `<file>` is a directory, everything in it is added below `<dest>`, so a whole tree is one pair, e.g. `eptrepo add repo c86 1.0 target /`. Recipes take the same form in `FILES`, e.g. `include:/usr/include`. A symlink is published as a copy of what it points to. The target is looked up inside the package, as it will be on ELKS: a link to `/lib/x` gets the package's `/lib/x`, never a file of the build host.
@@ -70,6 +71,8 @@ A package is refused, and the old one left as it was, if it has files that canno
 `-d` (`DESC="..."` in a recipe) sets the description that `ept search` shows; keep it under 65 characters so it fits on a line. Without `-d` a package keeps the description it had.
 
 `eptrepo index` builds the list from whatever is in `pool/`, so a package can also be maintained by hand: copy the files to `pool/<name>/`, write `pool/<name>/VERSION` (and `DESC` if you like), and run `eptrepo index <repo>`.
+
+`eptrepo html` writes `<repo>/index.html`, the home page a browser gets at `/`: how to get started, the commands, and every package with its release and nightly versions. It is plain HTML that old browsers like ELKSWeb can show. The builder rewrites it after every build cycle; set `EPT_URL` to the address people should use for the repository (default `http://ept.samwarr.dev`).
 
 ### License
 

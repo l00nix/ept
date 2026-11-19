@@ -13,6 +13,7 @@
 # Usage:
 #   eptrepo add [-s] [-d <text>] <repo> <name> <version> <file> <dest> ...
 #   eptrepo index <repo>
+#   eptrepo html <repo>
 #
 # If <file> is a directory, everything in it is added below <dest>,
 # e.g. "include /usr/include" or "target /". A symlink is published as a
@@ -23,6 +24,9 @@
 # with -s those files are reported and skipped instead.
 # -d sets the one line description that "ept search" shows; without it the
 # package keeps the description it had.
+# html writes <repo>/index.html, a home page with instructions and the
+# packages of <repo> and <repo>/nightly. EPT_URL is the address it gives for
+# the repository, default http://ept.samwarr.dev.
 
 set -e
 
@@ -33,7 +37,7 @@ MINEPT=1.8
 
 usage()
 {
-	sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'
+	sed -n '2,29p' "$0" | sed 's/^# \{0,1\}//'
 	exit 1
 }
 
@@ -222,8 +226,167 @@ add()
 	index "$repo"
 }
 
+# Home page for people who open the repository in a browser. Plain HTML that
+# old browsers (ELKSWeb, Lynx) can show; the style block is only a nicety.
+html()
+{
+	repo=$1
+	[ -f "$repo/index" ] || die "$repo/index: no package list, run eptrepo index first"
+	url=${EPT_URL:-http://ept.samwarr.dev}
+	sdesc=/dev/null nindex=/dev/null ndesc=/dev/null
+	if [ -f "$repo/desc" ]; then sdesc=$repo/desc; fi
+	if [ -f "$repo/nightly/index" ]; then nindex=$repo/nightly/index; fi
+	if [ -f "$repo/nightly/desc" ]; then ndesc=$repo/nightly/desc; fi
+	hasept=`awk '$1 == "ept" && $6 == "/bin/ept" { print "yes"; exit }' "$repo/index"`
+	out=$repo/.index.html.$$
+	{
+	cat <<EOF
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html><head>
+<meta http-equiv="Content-Type" content="text/html; charset=us-ascii">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ept - ELKS Package Tool</title>
+<style type="text/css"><!--
+body { max-width: 46em; margin: 1em auto; padding: 0 1em; font-family: sans-serif; line-height: 1.45; }
+pre { background: #f0f0f0; padding: .5em .75em; overflow-x: auto; }
+h3 { margin-bottom: .2em; }
+@media (prefers-color-scheme: dark) {
+  body { background: #161616; color: #ddd; }
+  a { color: #8ab4f8; }
+  pre { background: #262626; }
+}
+--></style>
+</head><body>
+<h1>ept - ELKS Package Tool</h1>
+<p>ept is a small package manager for <a href="https://github.com/ghaerr/elks">ELKS</a>,
+Linux for 8086-class PCs. It downloads programs from a plain HTTP repository like this
+one, checks them, and keeps them up to date.</p>
+EOF
+	if [ "$url" = http://ept.samwarr.dev ]; then
+		cat <<EOF
+<p>This is the main ept repository, the one ept uses out of the box. Every day it builds
+packages from source, so they track each project's latest release and latest code.</p>
+EOF
+	else
+		cat <<EOF
+<p>This is the repository at <tt>$url</tt>.</p>
+EOF
+	fi
+	cat <<EOF
+
+<h2>Getting started</h2>
+EOF
+	if [ "$url" = http://ept.samwarr.dev ]; then
+		cat <<EOF
+<p>With networking running (<tt>net start</tt>):</p>
+<pre>ept update
+ept list</pre>
+EOF
+	else
+		cat <<EOF
+<p>Make this the first <tt>REPO=</tt> line of <tt>/etc/ept.cfg</tt>, then with
+networking running (<tt>net start</tt>):</p>
+<pre>REPO=$url</pre>
+<pre>ept update
+ept list</pre>
+EOF
+	fi
+	if [ "$hasept" ]; then
+		cat <<EOF
+<p>If your ELKS does not have ept yet, download it first. <tt>ept install -r ept</tt>
+then checks <tt>/bin/ept</tt> against the package list and records it as installed,
+so <tt>ept upgrade</tt> keeps it current:</p>
+<pre>urlget $url/pool/ept/bin/ept &gt; /bin/ept
+chmod 755 /bin/ept
+ept install -r ept</pre>
+EOF
+	fi
+	cat <<'EOF'
+
+<h2>Using ept</h2>
+<pre>ept update                       fetch the package lists
+ept list [-n]                    show available and installed packages
+ept search [-n] [&lt;text&gt;]         find packages by name or description
+ept install [-n] [-r] &lt;pkg&gt; ...  install or repair packages
+ept upgrade [-y]                 update all installed packages
+ept remove &lt;pkg&gt; ...             remove packages</pre>
+<p><tt>-n</tt> uses nightly builds of the latest code instead of releases. A package
+installed with <tt>-n</tt> stays on nightlies until it is installed again without it.
+<tt>-r</tt> checks every file of a package on disk and fetches the ones that differ.
+<tt>-y</tt> skips the question before installing or upgrading.</p>
+
+<h2>Packages</h2>
+EOF
+	awk '
+	function esc(s) { gsub(/&/, "\\&amp;", s); gsub(/</, "\\&lt;", s); gsub(/>/, "\\&gt;", s); return s }
+	function kb(n) { return int((n + 1023) / 1024) "K" }
+	/^#/ { next }
+	FILENAME == ARGV[1] || FILENAME == ARGV[3] {
+		if (NF != 6) next
+		c = FILENAME == ARGV[1] ? "s" : "n"
+		if (!($1 in seen)) { seen[$1] = 1; names[++n] = $1 }
+		ver[c, $1] = $2
+		size[c, $1] += $4
+		next
+	}
+	{	# a description line, the release one first
+		name = $1
+		if (name in desc) next
+		sub(/^[^ ]+ */, "")
+		desc[name] = $0
+	}
+	END {
+		for (i = 2; i <= n; i++)
+			for (j = i; j > 1 && names[j - 1] > names[j]; j--) {
+				t = names[j]; names[j] = names[j - 1]; names[j - 1] = t
+			}
+		printf "<p>%d package%s. Releases are built from each project%ss version tags,\n", n, n == 1 ? "" : "s", "\047"
+		print "nightlies from its latest code.</p>"
+		for (i = 1; i <= n; i++) {
+			p = names[i]
+			print "<h3>" p "</h3>"
+			if (p in desc) print "<p>" esc(desc[p]) "</p>"
+			printf "<pre>"
+			if (("s", p) in ver)
+				printf "%-30s release %s, %s\n", "ept install " p, ver["s", p], kb(size["s", p])
+			if (("n", p) in ver)
+				printf "%-30s nightly %s, %s\n", "ept install -n " p, ver["n", p], kb(size["n", p])
+			print "</pre>"
+		}
+	}' "$repo/index" "$sdesc" "$nindex" "$ndesc"
+	cat <<EOF
+
+<h2>Other repositories</h2>
+<p>ept reads its repositories from <tt>REPO=</tt> lines in <tt>/etc/ept.cfg</tt>, up to 8.
+The first is the primary, and only it can update ept itself. For any other package a
+later line overrides an earlier one, so add extra repositories below the primary.
+<b>Every repository you list can install and replace files anywhere on your system,
+so only add ones you trust.</b></p>
+
+<h2>Adding a package</h2>
+<p>Packages are built from source by the repository's build server. To add one, open a
+pull request with a recipe in <a href="https://github.com/sammothxc/ept/tree/main/recipes">recipes/</a>:
+a few lines naming the git repository, the build command and where the files install.
+After that it keeps itself up to date: plain version tags such as <tt>v1.2</tt> become
+releases, and new commits become nightlies. Keep installed file names to 8.3 characters
+so they also work on FAT disks.</p>
+
+<hr>
+<p>Every file is checked against the size and MD5 in the package list before it
+replaces anything. ELKS has no TLS, so this catches damaged downloads, not tampering.</p>
+<p><a href="/index">Package list</a> | <a href="/nightly/index">Nightly list</a> |
+<a href="/pool/">Browse files</a> | <a href="https://github.com/sammothxc/ept">ept on GitHub</a><br>
+Updated `date -u '+%Y-%m-%d %H:%M UTC'`.</p>
+</body></html>
+EOF
+	} > "$out"
+	mv "$out" "$repo/index.html"
+	echo "$repo/index.html written"
+}
+
 case "$1" in
 add)	shift; add "$@";;
 index)	[ $# -eq 2 ] || usage; index "$2";;
+html)	[ $# -eq 2 ] || usage; html "$2";;
 *)	usage;;
 esac
