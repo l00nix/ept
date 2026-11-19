@@ -310,6 +310,8 @@ static int get(const char *rpath, int fd, long size, const char *sum)
             goto done;
         }
         md5_add(buf + i, n);
+        if (sum && (total ^ (total + n)) >> 12)
+            out(".");                   /* a heartbeat per 4K */
         total += n;
     }
     if (n >= 0 && !hdr && (size < 0 || total == size)) {
@@ -554,7 +556,7 @@ static void fileline(char *s)
     nnew += n;
     out("  ");
     out(f[5]);
-    out("\n");
+    out(" ");
     strcpy(path, ROOT);
     strcat(path, f[5]);
     for (p = path + strlen(ROOT) + 1; *p; p++)  /* create the parent directories */
@@ -575,6 +577,7 @@ static void fileline(char *s)
         return;
     }
     chmod(path, atoun(f[4], 8));
+    out("\n");
 }
 
 /* is d one of the files just installed? (only if they all fitted in newf) */
@@ -729,8 +732,8 @@ int main(int argc, char **argv)
     }
     if (argc < 2 || (strcmp(argv[1], "list") && argc < 3)
             || (strcmp(argv[1], "list") && strcmp(argv[1], "install") && strcmp(argv[1], "remove"))) {
-        out("usage: ept list [-n] | ept install [-n] <pkg> ... | ept remove <pkg> ...\n"
-            "This is tiny ept; \"ept install ept\" installs the full one.\n");
+        out("usage: ept list [-n] | ept install [-n] <pkgs> | ept remove <pkgs>\n"
+            "This is tinyept; \"ept install ept\" installs the full one.\n");
         return 1;
     }
     if (argv[1][0] == 'r') {
