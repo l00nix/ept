@@ -36,7 +36,7 @@
 
 #include "md5.c"                /* md5_t, md5_init/update/final, readbuf[BUFSIZ] */
 
-#define VERSION     "1.10"
+#define VERSION     "1.11"
 #define SELF        "/bin/ept"
 #define DEFREPO     "http://ept-repo.com"
 #define CONFIG      "/etc/ept.cfg"
