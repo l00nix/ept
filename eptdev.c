@@ -59,7 +59,7 @@
 #define DB          DIR "/inst"
 #define DBNEW       DIR "/inst.new"
 #ifndef TINY
-#define VERSION     "2.0-dev"
+#define VERSION     "2.0"
 #define VMAJOR      2           /* VERSION in numbers, for "#min" */
 #define VMINOR      0
 #define CONFIG      ROOT "/etc/ept.cfg"
@@ -1411,12 +1411,11 @@ int main(int argc, char **argv)
                 && strcmp(argv[1], "update") && strcmp(argv[1], "search"))
             || (argv[1][0] == 's' ? argc > 3 : (argc < 3) != (argv[1][0] == 'l' || argv[1][0] == 'u'))) {
         out("ept " VERSION "\n"
-            "usage: ept list [-n]            what there is, and what is installed\n"
-            "       ept search [-n] [<text>] find packages by name or description\n"
-            "       ept install [-n] <pkgs>  install or update packages\n"
-            "       ept update               update everything installed\n"
-            "       ept remove <pkgs>        remove packages\n"
-            "  -n  the nightly builds   -r  fetch every file again\n");
+            "usage: ept list [-n]\n"
+            "       ept search [-n] [<text>]\n"
+            "       ept install [-n] [-r] <pkgs>\n"
+            "       ept update\n"
+            "       ept remove <pkgs>\n");
         return 1;
     }
 #endif
