@@ -1,0 +1,2 @@
+ept works: this file was installed by "ept install eptest".
+Remove it with "ept remove eptest".

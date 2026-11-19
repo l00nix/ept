@@ -1,0 +1,7 @@
+# eptest: a harmless package for checking that ept works
+DESC="Test package: installs /root/eptest.txt and nothing else, safe to install and remove"
+GIT=https://github.com/sammothxc/ept.git
+BUILD="true"
+FILES="eptest/eptest.txt:/root/eptest.txt"
+# nightlies only: no ept release has eptest/ yet
+STABLE=no
