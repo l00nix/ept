@@ -258,7 +258,7 @@ static void onalarm(int sig)
 static int get(const char *rpath, int fd, long size, const char *sum)
 {
     int s, n, i, hdr = 1, nl = 0, slen = 0, rc = -1;
-    unsigned long total = 0;
+    unsigned long total = 0, mark = size;
     char status[12];
     struct sockaddr_in a;
 
@@ -286,6 +286,8 @@ static int get(const char *rpath, int fd, long size, const char *sum)
     if (write(s, buf, n) != n)
         goto done;
     md5_init();
+    if (sum)
+        out("  [................]\r  [");
     signal(SIGALRM, onalarm);
     while (alarm(STALL), (n = read(s, buf, sizeof(buf))) > 0) {
         for (i = 0; i < n && hdr; i++) {
@@ -310,9 +312,11 @@ static int get(const char *rpath, int fd, long size, const char *sum)
             goto done;
         }
         md5_add(buf + i, n);
-        if (sum && (total ^ (total + n)) >> 12)
-            out(".");                   /* a heartbeat per 4K */
         total += n;
+        while (sum && (total << 4) >= mark) {
+            out("#");                   /* a sixteenth of the file */
+            mark += size;
+        }
     }
     if (n >= 0 && !hdr && (size < 0 || total == size)) {
         why = "checksum mismatch";
@@ -556,7 +560,7 @@ static void fileline(char *s)
     nnew += n;
     out("  ");
     out(f[5]);
-    out(" ");
+    out("\n");
     strcpy(path, ROOT);
     strcat(path, f[5]);
     for (p = path + strlen(ROOT) + 1; *p; p++)  /* create the parent directories */
