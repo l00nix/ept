@@ -2,34 +2,62 @@
 
 A small package manager for [ELKS](https://github.com/ghaerr/elks). It downloads programs from a plain HTTP repository, verifies them, and keeps them up to date.
 
-### Usage
+There are two builds, and both install as `/bin/ept`: the full ept, and [tiny ept](#usage-tiny-ept) for floppy systems. They share the same package lists and installed list, so you can switch between them at any time.
+
+### Usage: full ept
 ```
-ept update                       fetch the package lists
-ept list [-n]                    show available and installed packages
-ept search [-n] [<text>]         find packages by name or description
-ept install [-n] [-r] <pkg> ...  install or repair packages
-ept upgrade [-y]                 update all installed packages
-ept remove <pkg> ...             remove packages
+ept list [-n]                 show available and installed packages
+ept install [-n] [-r] <pkgs>  install or update packages
+ept install -a                update everything installed
+ept remove <pkgs>             remove packages
+  -n  use the nightly builds instead of the tagged releases
+  -r  fetch every file of the package again
 ```
 
-`list`, `install` and `upgrade` fetch the package list first, so they never work from a stale one. Whenever a list is fetched, packages that were not in the previous one are announced with a `New package:` line each.
+`list` and `install` fetch the package list first, so they never work from a stale one. If a repository cannot be reached, `list` shows the list saved from last time.
 
-`search` shows each package with its one line description, or only those with `<text>` in the name or description, in any case. Descriptions are fetched for `search` alone; a repository that has none just shows the names.
+`install` shows how much it will download and how many files, next to the free space and free files (inodes) on the root filesystem, and asks `[Y/n]` once for all the packages named. Scripts answer by piping: `echo | ept install <pkg>`.
 
-`install` shows how many files and how much it has to download for each package and asks first, and `upgrade` does the same with what would change; `-y` skips the question. Nothing is asked when there is nothing to download, or for `install -r`.
+A new version of a package only downloads the files that changed, and a package with nothing to download is reported as up to date without asking. `ept` goes by its record of what it installed, so a file that was damaged or replaced afterwards is not noticed; `install -r` fetches every file of the package again.
 
-A new version of a package only downloads the files that changed. `ept` goes by its record of what it installed, so a file that was damaged or replaced afterwards is not noticed. `install -r` repairs that: it checks the size and MD5 of every file of the package on disk and downloads the ones that differ or are missing.
+`install -a` updates everything installed. It fetches the package lists (the nightly ones too, if anything nightly is installed), shows what would change, and asks once:
+```
+  fetch86        1.0 -> 1.1  10K
+  cowsay         20260101-0000000 -> 20261116-fd42a87  0K (nightly)
+Install 10K, 1 files (396K, 11 files free)? [Y/n]
+```
 
-`-n` uses the nightly builds instead of the tagged releases. A package installed with `-n` stays on the nightly channel for `ept upgrade` until it is installed again without `-n`.
+`-n` uses the nightly builds instead of the tagged releases. A package installed with `-n` stays on the nightly channel for `install -a` until it is installed again without `-n`.
+
+While a file downloads, a bar fills with one `#` per sixteenth of it. Files a new version no longer has are deleted. A file belongs to the package that installed it last, so removing one package never deletes a file another package has taken over.
+
+### Usage: tiny ept
+```
+ept list [-n]            show available and installed packages
+ept install [-n] <pkgs>  install or update packages
+ept remove <pkgs>        remove packages
+```
+
+Tiny ept is the full ept cut down to fit a floppy. It is under 7,168 bytes, so it takes 7 blocks on a MINIX floppy.
+
+- `ept install -n tinyept` replaces the full ept with tiny ept (tiny ept is only built as a nightly for now). Run the same command once more with tiny ept to tidy the installed list: it then records `/bin/ept` as tinyept's instead of ept's.
+- `ept install ept` brings the full ept back.
+
+It works like the full ept, except:
+
+- It only uses `http://ept-repo.com`; `/etc/ept.cfg` is not read.
+- There is no `install -a`. To update everything, run `ept list` and `ept install` the packages that show `[installed <older version>]`.
+- There is no `-r`, because `install` downloads every file of the package every time, including files that did not change.
+- A failed download is tried again right away instead of after 5 seconds; with one repository, that is enough.
 
 ### On ELKS
 
-- Build: `make` (needs `ia16-elf-gcc` with the ELKS libc), then copy `ept` to `/bin/ept`.
-- Repository: defaults to `http://ept-repo.com` (`http://ept.samwarr.dev` before 1.10, still served). To use others, put `REPO=http://host[:port][/path]` lines in `/etc/ept.cfg`; see [Repositories](#repositories).
+- Build: `make eptdev` for the full ept or `make tiny/tinyept` for tiny ept, then copy the result to `/bin/ept`. Both need `ia16-elf-gcc` with the ELKS libc, including its regparmcall variant (`-mregparmcall`), which the ELKS libc build makes. Plain `make` still builds the 1.x `ept` from `ept.c`.
+- Repository: defaults to `http://ept-repo.com` (`http://ept.samwarr.dev` before 1.10, still served). To use others, put `REPO=http://host[:port][/path]` lines in `/etc/ept.cfg`, where host is a name (looked up with DNS) or an IP address; see [Repositories](#repositories).
 - State: `/etc/ept/index` and `/etc/ept/nindex` are the package lists (`index.1`, `nindex.1` and so on for extra repositories), `/etc/ept/inst` records what is installed.
 - Networking must be up first (`net start`).
 
-Every download is checked against the size and MD5 in the package list before it replaces anything. **ELKS has no TLS, so this catches corruption, not tampering.** A download that stops partway, as happens on slow serial (SLIP) links, is resumed from where it stopped for as long as each attempt gets further; it gives up after 3 attempts in a row that get nothing more. If an install stops partway, the files fetched so far stay in place; run the same `ept install` again to finish it.
+Every download is checked against the size and MD5 in the package list before it replaces anything. **ELKS has no TLS, so this catches corruption, not tampering.** A download that stalls for 10 seconds is tried again, up to 3 tries in all, starting the file over each time; the full ept waits 5 seconds between tries, so that ELKS networking has time to free the connections of the failed ones. If an install stops partway, the files fetched so far stay in place; run the same `ept install` again to finish it.
 
 ### Repositories
 
@@ -40,8 +68,8 @@ Every `REPO=` line in `/etc/ept.cfg` is a repository, up to 8 of them; if the fi
 - The first repository is the primary. Only it can update `ept` itself: the `ept` package and the file `/bin/ept` are never taken from another one.
 - The others are extras, for things like a maintainer's test builds. For any other package a later line overrides an earlier one, so add extras below the primary.
 - Packages are matched by name only. A build published under the same name as a package of another repository replaces it; to have it installed next to the original, give it its own name and its own file paths, e.g. `lua-test` in `/bin/lua-test`.
-- Where a package comes from is not remembered. Add a repository that has a different build of something installed and `ept upgrade` offers that build; take the line out again and it offers the previous one.
-- A repository that cannot be reached, or has no nightly builds when `-n` is used, is skipped for that run. So is an extra that needs a newer `ept` than the primary provides.
+- Where a package comes from is not remembered. Add a repository that has a different build of something installed and `ept install -a` offers that build; take the line out again and it offers the previous one.
+- A repository that cannot be reached, or has no nightly builds when `-n` is used, is skipped for that run.
 
 ### Repository format
 
