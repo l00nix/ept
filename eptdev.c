@@ -60,8 +60,11 @@
 #define DBNEW       DIR "/inst.new"
 #ifndef TINY
 #define VERSION     "2.0-dev"
+#define VMAJOR      2           /* VERSION in numbers, for "#min" */
+#define VMINOR      0
 #define CONFIG      ROOT "/etc/ept.cfg"
-#define INDEXNEW    DIR "/index.new"
+#define INDEXNEW    DBNEW       /* the temporary files are never needed at once: */
+#define DESC        DBNEW       /* a new list, a new installed list, descriptions */
 #define SELF        "/bin/ept"
 #define MAXREPO     8
 #define URLSZ       160
@@ -109,18 +112,23 @@ static int nrepo, repo;         /* how many, and the one in use */
 static unsigned live[2];        /* those with a usable package list, per channel */
 #define LIVE        live[*chan != 0]
 static ipaddr_t ips[MAXREPO];   /* their addresses, each looked up once */
-static char host[64];           /* host, port and path prefix of the one in use */
-static unsigned port;
-static char *base;
+static char hosts[MAXREPO][64]; /* their host, port and path prefix */
+static unsigned ports[MAXREPO];
+static char *bases[MAXREPO];
 static char idxname[sizeof(NINDEX) + 4]; /* its package list file */
 static char whyb[80];
 static int notfound, quiet;     /* the last reply was a 404; a 404 is no error */
 static int listing;             /* ept list: an old package list beats none */
-static int fresh, all;          /* -r: fetch every file again; -a: update everything */
+static int fresh;               /* -r: fetch every file again */
+static unsigned long from;      /* bytes of the file already fetched: where to resume */
 static int anyn, got;           /* a package came from the nightly builds; files fetched */
 static char fver[256];          /* the version findrepo() found, or being installed */
-#define RHOST       host
-#define RPORT       port
+static char *text;              /* ept search: what to look for */
+static int matches;             /* packages search found */
+static int newer;               /* the list just fetched needs a newer ept */
+#define RHOST       hosts[repo]
+#define RPORT       ports[repo]
+#define RBASE       bases[repo]
 #define RIP         ips[repo]
 #endif
 
@@ -343,11 +351,15 @@ static int get(const char *rpath, int fd, long size, const char *sum)
     char status[12];
     struct sockaddr_in a;
 
+#ifndef TINY
+    total = from;
+#endif
+
 #ifdef TINY
     why = "cannot reach " REPOHOST;
 #else
     strcpy(whyb, "cannot reach ");
-    strcat(whyb, host);
+    strcat(whyb, RHOST);
     why = whyb;
     notfound = 0;
 #endif
@@ -376,15 +388,23 @@ static int get(const char *rpath, int fd, long size, const char *sum)
     strcat(buf, rpath);
     strcat(buf, " HTTP/1.0\r\nHost: " REPOHOST "\r\nUser-Agent: ept-tiny\r\nConnection: close\r\n\r\n");
 #else
-    strcat(buf, base);
+    strcat(buf, RBASE);
     strcat(buf, rpath);
     strcat(buf, " HTTP/1.0\r\nHost: ");
-    strncat(buf, repos[repo] + 7, base - (repos[repo] + 7));    /* host[:port] as written */
-    strcat(buf, "\r\nUser-Agent: ept/" VERSION "\r\nConnection: close\r\n\r\n");
+    strncat(buf, repos[repo] + 7, RBASE - (repos[repo] + 7));    /* host[:port] as written */
+    if (from) {
+        strcat(buf, "\r\nRange: bytes=");
+        strcat(buf, ultostr(from, 10));
+        strcat(buf, "-");
+    }
+    strcat(buf, "\r\nUser-Agent: ept/" VERSION "\r\n\r\n");     /* HTTP/1.0: closed after */
 #endif
     n = strlen(buf);
     if (write(s, buf, n) != n)
         goto done;
+#ifndef TINY
+    if (!from)                          /* resuming: the md5 so far still holds */
+#endif
     md5_init();
     if (sum)
         out("  [................]\r  [");
@@ -402,6 +422,20 @@ static int get(const char *rpath, int fd, long size, const char *sum)
         }
         if (hdr)
             continue;
+#ifndef TINY
+        if (from && !strncmp(status + 9, "20", 2)) {    /* the reply to a resume */
+            if (status[11] == '6')
+                status[11] = '0';       /* the rest, as asked */
+            else {                      /* the whole file after all: start over */
+                lseek(fd, 0, SEEK_SET);
+                md5_init();
+                total = 0;
+                mark = size;
+                out("\r  [");
+            }
+            from = 0;
+        }
+#endif
         if (slen < sizeof(status) || strncmp(status, "HTTP/1.", 7) || strncmp(status + 9, "200", 3)) {
             why = "server error";
 #ifndef TINY
@@ -432,6 +466,9 @@ static int get(const char *rpath, int fd, long size, const char *sum)
 done:
     alarm(0);
     close(s);
+#ifndef TINY
+    from = sum && total < size ? total : 0;     /* complete but bad: start over */
+#endif
     return rc;
 }
 
@@ -473,9 +510,20 @@ static int replace(const char *from, const char *to)
 static int fetch(const char *rpath, const char *file, long size, const char *sum)
 {
     int fd, rc, try;
+#ifndef TINY
+    unsigned long before;
+
+    from = 0;
+#endif
 
     for (try = 1; ; try++) {
+#ifdef TINY
         if ((fd = open(file, O_WRONLY | O_CREAT | O_TRUNC, 0644)) < 0) {
+#else
+        before = from;
+        if ((fd = open(file, from ? O_WRONLY : O_WRONLY | O_CREAT | O_TRUNC, 0644)) < 0
+                || lseek(fd, from, SEEK_SET) < 0) {
+#endif
             say("cannot write ", file);
             return -1;
         }
@@ -489,6 +537,8 @@ static int fetch(const char *rpath, const char *file, long size, const char *sum
 #ifndef TINY
         if (notfound)                   /* trying again will not change that */
             break;
+        if (from > before)
+            try = 0;                    /* it got further: the tries start over */
 #endif
         if (try == TRIES)
             break;
@@ -513,11 +563,34 @@ static int fetch(const char *rpath, const char *file, long size, const char *sum
 /* ---- the package list */
 static int lines, known, last;
 
+/* a package line of the list, in f[]? */
+static int pkgline(char *s)
+{
+    return s[0] != '#' && split(s) == 6;
+}
+
+#ifndef TINY
+/* is version v (major.minor, the rest ignored) newer than this ept? */
+static int newerthan(const char *v)
+{
+    unsigned n = atoun(v, 10);
+
+    if (n != VMAJOR)
+        return n > VMAJOR;
+    v = strchr(v, '.');
+    return v && atoun(v + 1, 10) > VMINOR;
+}
+#endif
+
 static void checkline(char *s)
 {
     if (lines++ == 0)
         known = !strcmp(s, "#ept1");    /* a list this ept understands */
     last = !strcmp(s, "#end");
+#ifndef TINY
+    if (!strncmp(s, "#min ", 5) && newerthan(s + 5))
+        newer = 1;                      /* "#min <version>": the oldest ept it suits */
+#endif
 }
 
 #ifdef TINY
@@ -540,22 +613,11 @@ static int update(void)
 #else
 /* ---- repositories */
 
-/* use repository i: its host, port and path prefix, and its package list for
- * the channel (index, index.1, ... or nindex, nindex.1, ...) */
+/* use repository i, and its package list for the channel (index, index.1,
+ * ... or nindex, nindex.1, ...) */
 static void setrepo(int i)
 {
-    char *u = repos[i] + 7, *p;
-
     repo = i;
-    for (p = u; *p != ':' && *p != '/' && *p; p++)
-        ;
-    memcpy(host, u, p - u);
-    host[p - u] = '\0';
-    port = 80;
-    if (*p == ':')
-        for (port = atoun(++p, 10); *p >= '0' && *p <= '9'; p++)
-            ;
-    base = p;
     strcpy(idxname, *chan ? NINDEX : INDEX);
     if (i) {
         strcat(idxname, ".");
@@ -568,7 +630,7 @@ static void setrepo(int i)
 static void cfgline(char *s)
 {
     char *p, *u;
-    unsigned n;
+    unsigned n, port = 80;
 
     if (strncmp(s, "REPO=", 5))
         return;
@@ -579,16 +641,19 @@ static void cfgline(char *s)
         ;
     n = p - u;
     if (*p == ':') {
-        if (!atoun(p + 1, 10))
+        if (!(port = atoun(p + 1, 10)))
             goto bad;                   /* no port, or 0 */
         while (*++p >= '0' && *p <= '9')
             ;
     }
-    if (!n || n >= sizeof(host) || (*p && *p != '/'))
+    if (!n || n >= sizeof(hosts[0]) || (*p && *p != '/'))
         goto bad;
     for (u = p + strlen(p); u > p && u[-1] == '/'; )
         *--u = '\0';                   /* no trailing slash */
-    strcpy(repos[nrepo++], s);
+    memcpy(hosts[nrepo], s + 7, n);
+    ports[nrepo] = port;
+    bases[nrepo] = strcpy(repos[nrepo], s) + (p - s);
+    nrepo++;
     return;
 bad:
     say("bad repository in " CONFIG ": ", s);
@@ -599,14 +664,10 @@ bad:
 static void readcfg(void)
 {
     static const char cfg[] =
-        "# /etc/ept.cfg - ept repositories, one REPO= line each.\n"
-        "#\n"
-        "# WARNING: every repository listed here can install and replace\n"
-        "# files anywhere on this system. Only add repositories you trust.\n"
-        "#\n"
-        "# The FIRST repository is the primary: it is the only one that can\n"
-        "# update ept itself. Add extra repositories BELOW it; for any other\n"
-        "# package, a later line overrides an earlier one.\n"
+        "# ept repositories, one REPO= line each.\n"
+        "# WARNING: every repository can replace any file on this system.\n"
+        "# Only add ones you trust. Only the FIRST can update ept; add others\n"
+        "# below it: for other packages, a later line overrides an earlier one.\n"
         "\n"
         "REPO=" DEFREPO "\n";
     int fd;
@@ -617,7 +678,44 @@ static void readcfg(void)
         close(fd);
     }
     if (!nrepo)
-        strcpy(repos[nrepo++], DEFREPO);
+        cfgline((char *)"REPO=" DEFREPO);
+}
+
+static int has;
+static char prev[256], avail[256]; /* fields of a line fit */
+static int install(char *name);
+
+static void hasline(char *s);
+
+/* a package of the list just fetched that the saved one does not have */
+static void newline_(char *s)
+{
+    if (!pkgline(s) || !strcmp(f[0], prev))
+        return;
+    strcpy(prev, f[0]);
+    pkg = prev;
+    has = 0;
+    eachline(idx, hasline);
+    if (!has) {
+        out("New package: ");
+        out(prev);
+        out(*chan ? " (nightly)\n" : "\n");
+    }
+}
+
+/* the first repository needs a newer ept: install it, then stop, as the
+ * command is for the new one to carry out */
+static void selfupdate(void)
+{
+    LIVE |= 1;
+    fresh = 0;
+    if (install("ept") == 0) {
+        if (got)
+            out("ept is updated: run the command again\n");
+        else                            /* what it has is this one */
+            say("no newer ept in ", repos[0]);
+    }
+    exit(1);
 }
 
 /* fetch the package list of the repository in use */
@@ -631,12 +729,16 @@ static int fetchlist(void)
     strcat(rpath, "/index");
     if (fetch(rpath, INDEXNEW, -1, NULL) != 0)
         return -1;
-    lines = known = last = 0;
+    lines = known = last = newer = 0;
     eachline(INDEXNEW, checkline);
     if (!known || !last) {              /* a newer format, or cut short */
         say("unusable package list from ", repos[repo]);
         unlink(INDEXNEW);
         return -1;
+    }
+    if (access(idx, 0) == 0) {          /* not the first list from it */
+        prev[0] = '\0';
+        eachline(INDEXNEW, newline_);
     }
     return replace(INDEXNEW, idx);
 }
@@ -651,9 +753,14 @@ static int update(void)
     quiet = *chan;                      /* a repository need not have nightly builds */
     for (i = 0; i < nrepo; i++) {
         setrepo(i);
-        if (fetchlist() == 0)
-            LIVE |= 1 << i;
-        else if (quiet && notfound)
+        if (fetchlist() == 0) {
+            if (!newer)
+                LIVE |= 1 << i;
+            else if (!i)
+                selfupdate();           /* runs the new ept: no return */
+            else
+                say("needs a newer ept, skipping ", repos[i]);
+        } else if (quiet && notfound)
             none++;
         else if (listing && access(idx, 0) == 0) {
             out("Showing the saved package list\n");
@@ -668,15 +775,7 @@ static int update(void)
 }
 #endif
 
-/* a package line of the list, in f[]? */
-static int pkgline(char *s)
-{
-    return s[0] != '#' && split(s) == 6;
-}
-
 #ifndef TINY
-static int has;
-
 static void hasline(char *s)
 {
     if (pkgline(s) && !strcmp(f[0], pkg)) {
@@ -709,7 +808,9 @@ static int findrepo(char *name)
 
 /* ---- list */
 static char inst[512];          /* installed packages: " name version" each */
+#ifdef TINY
 static char prev[256], avail[256]; /* fields of a line fit */
+#endif
 static unsigned long total;
 #ifndef TINY
 static char ich;                /* the channel of the last instver() found */
@@ -773,6 +874,32 @@ static void pad(const char *s, int w)
         out(" ");
 }
 
+#ifndef TINY
+/* the description of pkg, into avail */
+static void descline(char *s)
+{
+    int n = strlen(pkg);
+
+    if (!strncmp(s, pkg, n) && s[n] == ' ')
+        strcpy(avail, s + n + 1);
+}
+
+/* does s have the search text in it, in any case? */
+static int hastext(const char *s)
+{
+    int i;
+
+    for (;; s++) {
+        for (i = 0; text[i] && s[i] && (s[i] | 32) == (text[i] | 32); i++)
+            ;
+        if (!text[i])
+            return 1;
+        if (!*s)
+            return 0;
+    }
+}
+#endif
+
 static void showpkg(void)
 {
     char *v;
@@ -782,6 +909,18 @@ static void showpkg(void)
 #ifndef TINY
     if (!show)
         return;                         /* another repository provides it */
+    if (text) {                         /* ept search: the name and description */
+        pkg = prev;
+        avail[0] = '\0';
+        eachline(DESC, descline);
+        if (hastext(prev) || hastext(avail)) {
+            pad(prev, 15);
+            out(avail);
+            out("\n");
+            matches++;
+        }
+        return;
+    }
 #endif
     pad(prev, 15);
     pad(avail, 13);
@@ -867,9 +1006,23 @@ static int list(void)
         if (!(LIVE & 1 << cur))
             continue;
         setrepo(cur);
+        if (text) {                     /* its descriptions, if it has any */
+            strcpy(rpath, chan);
+            strcat(rpath, "/desc");
+            quiet = 1;
+            fetch(rpath, DESC, -1, NULL);
+            quiet = 0;
+        }
         prev[0] = '\0';
         eachline(idx, listline);
         showpkg();
+    }
+    if (text) {
+        unlink(DESC);
+        if (matches)
+            return 0;
+        say("no package matches ", text);
+        return 1;
     }
     prev[0] = '\0';
     eachline(DB, goneline);
@@ -1166,6 +1319,8 @@ static int remove_(char *name)
 #ifndef TINY
 static char upg[512];           /* to update: channel letter, name NUL, version NUL each */
 static unsigned nup;
+static char *ups[2 + sizeof(upg) / 4];  /* the names in upg, from [2] on like argv */
+static int nups;
 
 /* take the channel of a package: s or n */
 static void setchan(int c)
@@ -1190,66 +1345,39 @@ static void upline(char *s)
     n = strlen(prev) + strlen(v) + 3;
     if (nup + n < sizeof(upg)) {
         upg[nup] = cname[1];
-        strcpy(upg + nup + 1, prev);
+        ups[2 + nups++] = strcpy(upg + nup + 1, prev);
         strcpy(upg + nup + 2 + strlen(prev), v);
         nup += n;
     }
 }
 
-/* ept install -a: update every installed package from its own channel */
+/* ept update: fetch the lists and find what changed. The number of packages
+ * to update (in ups) or -1; main() then installs them as for ept install */
 static int upall(void)
 {
-    char *p, *name, *old;
-    unsigned long t;
-    int rc = 0;
-
     inst[0] = ' ';
     eachline(DB, instline);             /* notes whether anything is nightly */
     setchan('s');
     if (update() != 0)
-        return 1;
+        return -1;
     if (anyn) {                         /* nightly lists only when they are needed */
         setchan('n');
         update();
     }
     prev[0] = '\0';
     eachline(DB, upline);
-    if (!nup) {
+    if (!nups)
         out("All packages are up to date\n");
-        return 0;
-    }
-    for (p = upg; p < upg + nup; p = old + strlen(old) + 1) {
-        name = p + 1;
-        old = name + strlen(name) + 1;
-        setchan(*p);
-        findrepo(name);
-        pkg = name;
-        t = total;
-        eachline(idx, sizeline);
-        out("  ");
-        pad(name, 15);
-        out(old);
-        out(" -> ");
-        out(fver);
-        out("  ");
-        out(num((total - t + 1023) / 1024));
-        out(*p == 'n' ? "K (nightly)\n" : "K\n");
-    }
-    if (total && !ask())
-        return 0;
-    for (p = upg; p < upg + nup; p = old + strlen(old) + 1) {
-        name = p + 1;
-        old = name + strlen(name) + 1;
-        setchan(*p);
-        rc |= install(name);
-    }
-    return rc;
+    return nups;
 }
 #endif
 
 int main(int argc, char **argv)
 {
     int i, rc = 0;
+#ifndef TINY
+    unsigned long t;
+#endif
 
 #ifdef TINY
     if (argc > 2 && !strcmp(argv[2], "-n")) {
@@ -1267,25 +1395,26 @@ int main(int argc, char **argv)
         return 1;
     }
 #else
-    while (argc > 2 && argv[2][0] == '-') {     /* -n, -r, -a, in any order */
+    while (argc > 2 && argv[2][0] == '-') {     /* -n and -r, in any order */
         if (argv[2][1] == 'n')
             setchan('n');
         else if (argv[2][1] == 'r')
             fresh = 1;
-        else if (argv[2][1] == 'a')
-            all = 1;
         else
             argc = 0;                   /* anything else: usage */
         argv[2] = argv[1];
         argv++;
         argc--;
     }
-    if (argc < 2 || (strcmp(argv[1], "list") && strcmp(argv[1], "install") && strcmp(argv[1], "remove"))
-            || (argv[1][0] != 'l' && argc < 3 && !all) || (all && (argc > 2 || argv[1][0] != 'i'))) {
+    /* list and update take no names, install and remove need some, search one at most */
+    if (argc < 2 || (strcmp(argv[1], "list") && strcmp(argv[1], "install") && strcmp(argv[1], "remove")
+                && strcmp(argv[1], "update") && strcmp(argv[1], "search"))
+            || (argv[1][0] == 's' ? argc > 3 : (argc < 3) != (argv[1][0] == 'l' || argv[1][0] == 'u'))) {
         out("ept " VERSION "\n"
             "usage: ept list [-n]            what there is, and what is installed\n"
+            "       ept search [-n] [<text>] find packages by name or description\n"
             "       ept install [-n] <pkgs>  install or update packages\n"
-            "       ept install -a           update everything installed\n"
+            "       ept update               update everything installed\n"
             "       ept remove <pkgs>        remove packages\n"
             "  -n  the nightly builds   -r  fetch every file again\n");
         return 1;
@@ -1302,24 +1431,55 @@ int main(int argc, char **argv)
     out("/index\n");
 #else
     readcfg();
-    listing = argv[1][0] == 'l';
-    if (all)
-        return upall();
+    if (argv[1][0] == 's')
+        text = argc > 2 ? argv[2] : "";
+    listing = argv[1][0] == 'l' || text;
+    if (argv[1][0] == 'u') {            /* update: the packages that changed */
+        if ((i = upall()) <= 0)
+            return i < 0;
+        ups[1] = argv[1];
+        argv = ups;
+        argc = i + 2;
+    } else
 #endif
     if (update() != 0)
         return 1;
+#ifdef TINY
     if (argv[1][0] == 'l')
+#else
+    if (argv[1][0] == 'l' || text)
+#endif
         return list();
     for (i = 2; i < argc; i++) {        /* one question for all the packages */
         pkg = argv[i];
 #ifndef TINY
+        if (argv == ups)
+            setchan(pkg[-1]);           /* its own channel */
+        t = total;
         if (findrepo(pkg) >= 0)
 #endif
         eachline(idx, sizeline);
+#ifndef TINY
+        if (argv == ups) {              /* "  name  old -> new  NK" */
+            out("  ");
+            pad(pkg, 15);
+            out(pkg + strlen(pkg) + 1);
+            out(" -> ");
+            out(fver);
+            out("  ");
+            out(num((total - t + 1023) / 1024));
+            out(*chan ? "K (nightly)\n" : "K\n");
+        }
+#endif
     }
     if (total && !ask())
         return 0;
-    for (i = 2; i < argc; i++)
+    for (i = 2; i < argc; i++) {
+#ifndef TINY
+        if (argv == ups)
+            setchan(argv[i][-1]);
+#endif
         rc |= install(argv[i]);
+    }
     return rc;
 }
