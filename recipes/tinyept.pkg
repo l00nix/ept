@@ -1,0 +1,7 @@
+# tinyept: the small ept for floppy systems, installed in place of the full one
+DESC="Tiny ept for floppy systems; replaces /bin/ept, ept install ept brings the full one back"
+GIT=https://github.com/sammothxc/ept.git
+BUILD="make tiny/tinyept"
+FILES="tiny/tinyept:/bin/ept"
+# nightlies only until an ept release tag includes tiny/ (v1.10 does not)
+STABLE=no
