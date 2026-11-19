@@ -13,7 +13,7 @@
 # Usage:
 #   eptrepo add [-s] [-d <text>] <repo> <name> <version> <file> <dest> ...
 #   eptrepo index <repo>
-#   eptrepo html <repo> [<mirrors>]
+#   eptrepo html <repo> [<recipes>]
 #
 # If <file> is a directory, everything in it is added below <dest>,
 # e.g. "include /usr/include" or "target /". A symlink is published as a
@@ -26,8 +26,9 @@
 # package keeps the description it had.
 # html writes <repo>/index.html, a home page with instructions and the
 # packages of <repo> and <repo>/nightly. EPT_URL is the address it gives for
-# the repository, default http://ept.samwarr.dev. <mirrors> lists other
-# repositories for the page, one "<url> <description>" line each.
+# the repository, default http://ept.samwarr.dev. From a <recipes> directory
+# it takes each package's project link (GIT= of <name>.pkg) and the other
+# repositories to list (the file "mirrors", one "<url> <description>" each).
 
 set -e
 
@@ -231,9 +232,20 @@ add()
 # old browsers (ELKSWeb, Lynx) can show; the style block is only a nicety.
 html()
 {
-	repo=$1 mirrors=${2:-/dev/null}
+	repo=$1 recipes=$2 mirrors=/dev/null srcs=/dev/null
 	[ -f "$repo/index" ] || die "$repo/index: no package list, run eptrepo index first"
-	[ -f "$mirrors" ] || mirrors=/dev/null
+	if [ -n "$recipes" ] && [ -d "$recipes" ]; then
+		if [ -f "$recipes/mirrors" ]; then mirrors=$recipes/mirrors; fi
+		# "<name> <web address>" for each recipe with an http(s) GIT=
+		srcs=$repo/.src.$$
+		for f in "$recipes"/*.pkg; do
+			[ -f "$f" ] || continue
+			g=`sed -n 's/^GIT=//p' "$f" | head -1 | tr -d "\"'"`
+			case "$g" in
+			http://*|https://*) echo "`basename "$f" .pkg` ${g%.git}" ;;
+			esac
+		done > "$srcs"
+	fi
 	url=${EPT_URL:-http://ept.samwarr.dev}
 	sdesc=/dev/null nindex=/dev/null ndesc=/dev/null
 	if [ -f "$repo/desc" ]; then sdesc=$repo/desc; fi
@@ -323,6 +335,7 @@ EOF
 	function esc(s) { gsub(/&/, "\\&amp;", s); gsub(/</, "\\&lt;", s); gsub(/>/, "\\&gt;", s); return s }
 	function kb(n) { return int((n + 1023) / 1024) "K" }
 	/^#/ { next }
+	FILENAME == ARGV[5] { src[$1] = $2; next }
 	FILENAME == ARGV[1] || FILENAME == ARGV[3] {
 		if (NF != 6) next
 		c = FILENAME == ARGV[1] ? "s" : "n"
@@ -347,7 +360,15 @@ EOF
 		for (i = 1; i <= n; i++) {
 			p = names[i]
 			print "<h3>" p "</h3>"
-			if (p in desc) print "<p>" esc(desc[p]) "</p>"
+			if (p in desc || p in src) {
+				printf "<p>%s", p in desc ? esc(desc[p]) : ""
+				if (p in src) {
+					s = src[p]; t = s; sub(/^https?:\/\//, "", t)
+					gsub(/"/, "%22", s)
+					printf "%sProject: <a href=\"%s\">%s</a>", p in desc ? "<br>\n" : "", esc(s), esc(t)
+				}
+				print "</p>"
+			}
 			printf "<pre>"
 			if (("s", p) in ver)
 				printf "%-30s release %s, %s\n", "ept install " p, ver["s", p], kb(size["s", p])
@@ -355,7 +376,7 @@ EOF
 				printf "%-30s nightly %s, %s\n", "ept install -n " p, ver["n", p], kb(size["n", p])
 			print "</pre>"
 		}
-	}' "$repo/index" "$sdesc" "$nindex" "$ndesc"
+	}' "$repo/index" "$sdesc" "$nindex" "$ndesc" "$srcs"
 	cat <<EOF
 
 <h2>Other repositories</h2>
@@ -401,6 +422,7 @@ Updated `date -u '+%Y-%m-%d %H:%M UTC'`.</p>
 EOF
 	} > "$out"
 	mv "$out" "$repo/index.html"
+	if [ "$srcs" != /dev/null ]; then rm -f "$srcs"; fi
 	echo "$repo/index.html written"
 }
 

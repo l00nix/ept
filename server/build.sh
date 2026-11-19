@@ -206,8 +206,9 @@ build_all()
 	# keep both indexes valid even when there are no packages yet
 	eptrepo index "$REPO" > /dev/null
 	eptrepo index "$REPO/nightly" > /dev/null
-	# the home page; EPT_URL is the address it shows, recipes/mirrors the other repositories
-	eptrepo html "$REPO" "$RECIPES/mirrors" > /dev/null
+	# the home page; EPT_URL is the address it shows, the recipes give the
+	# project links and recipes/mirrors the other repositories
+	eptrepo html "$REPO" "$RECIPES" > /dev/null
 }
 
 # Run one build cycle while holding $WORK/build.lock. The container's own
