@@ -38,6 +38,8 @@
 #include <sys/stat.h>
 #include <sys/mount.h>
 #include <signal.h>
+#include <sys/select.h>
+#include <sys/time.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
@@ -56,6 +58,17 @@
 #define NINDEX      DIR "/nindex"
 #define DB          DIR "/inst"
 #define DBNEW       DIR "/inst.new"
+#ifndef TINY
+#define VERSION     "2.0-dev"
+#define CONFIG      ROOT "/etc/ept.cfg"
+#define INDEXNEW    DIR "/index.new"
+#define SELF        "/bin/ept"
+#define MAXREPO     8
+#define URLSZ       160
+#ifndef DEFREPO                 /* overridable for testing */
+#define DEFREPO     "http://ept-repo.com"
+#endif
+#endif
 
 #ifdef OLD_RESOLV               /* ELKS libc before in_resolv() took ancount */
 #define resolve(h)  in_resolv(h, NULL)
@@ -64,10 +77,12 @@
 #endif
 
 static char buf[1024];          /* network and copying */
+#ifdef TINY
 static char fbuf[512];          /* reading the lists */
 static char line[256];          /* the line being handed out; longer ones are cut */
 static int llen;
 static void (*online)(char *);
+#endif
 static char path[192], tmp[192];
 static char *pkg;               /* the package being installed or removed */
 static int found, bad, drop, outfd;
@@ -76,11 +91,34 @@ static int nfiles;              /* files of the packages to install */
 static char newf[512];          /* files of the new version, NUL separated */
 static unsigned nnew;           /* their length; more than fits: delete nothing */
 static char rpath[200];         /* the file being downloaded */
+#ifdef TINY
 static ipaddr_t ip;             /* the repository's address, once looked up */
+#endif
 static char *chan = "";         /* -n: "/nightly" */
 static char *idx = INDEX;       /* the list of the channel */
 static char cname[] = " s\n";  /* the channel in the installed list */
 static char *f[6];              /* fields of the current line */
+
+#ifdef TINY                     /* the one repository */
+#define RHOST       REPOHOST
+#define RPORT       REPOPORT
+#define RIP         ip
+#else                           /* the repositories of the config */
+static char repos[MAXREPO][URLSZ];  /* its REPO= lines; the first is the primary */
+static int nrepo, repo;         /* how many, and the one in use */
+static unsigned live;           /* those with a usable package list */
+static ipaddr_t ips[MAXREPO];   /* their addresses, each looked up once */
+static char host[64];           /* host, port and path prefix of the one in use */
+static unsigned port;
+static char *base;
+static char idxname[sizeof(NINDEX) + 4]; /* its package list file */
+static char whyb[80];
+static int notfound, quiet;     /* the last reply was a 404; a 404 is no error */
+static int listing;             /* ept list: an old package list beats none */
+#define RHOST       host
+#define RPORT       port
+#define RIP         ips[repo]
+#endif
 
 /* ---- MD5 (RFC 1321), one step per pass; x86 is little-endian, so the
  * block and the digest are used in place */
@@ -199,6 +237,7 @@ static unsigned long atoun(const char *s, int base)
 }
 
 /* ---- reading lists line by line */
+#ifdef TINY
 static void feed(const char *p, int n)
 {
     char c;
@@ -231,6 +270,39 @@ static int eachline(const char *file, void (*fn)(char *))
         feed("\n", 1);
     return n < 0 ? -1 : 0;
 }
+#else
+/* call fn for each line of a file; -1 if it cannot be read. The buffers are
+ * its own, so fn can read another file the same way */
+static int eachline(const char *file, void (*fn)(char *))
+{
+    char fb[512], ln[256];
+    int fd, n, i, len = 0;
+
+    if ((fd = open(file, O_RDONLY)) < 0)
+        return -1;
+    while ((n = read(fd, fb, sizeof(fb))) > 0)
+        for (i = 0; i < n; i++) {
+            if (fb[i] != '\n') {
+                if (len < sizeof(ln) - 1)
+                    ln[len++] = fb[i];      /* longer lines are cut */
+                continue;
+            }
+            if (len && ln[len - 1] == '\r')
+                len--;
+            ln[len] = '\0';
+            fn(ln);
+            len = 0;
+        }
+    close(fd);
+    if (len) {
+        if (ln[len - 1] == '\r')
+            len--;
+        ln[len] = '\0';
+        fn(ln);
+    }
+    return n < 0 ? -1 : 0;
+}
+#endif
 
 /* split s at blanks into f[]; the number of fields */
 static int split(char *s)
@@ -267,7 +339,14 @@ static int get(const char *rpath, int fd, long size, const char *sum)
     char status[12];
     struct sockaddr_in a;
 
+#ifdef TINY
     why = "cannot reach " REPOHOST;
+#else
+    strcpy(whyb, "cannot reach ");
+    strcat(whyb, host);
+    why = whyb;
+    notfound = 0;
+#endif
     if ((s = socket(AF_INET, SOCK_STREAM, 0)) < 0)
         return -1;
     a.sin_family = AF_INET;
@@ -275,18 +354,26 @@ static int get(const char *rpath, int fd, long size, const char *sum)
     a.sin_addr.s_addr = INADDR_ANY;
     if (bind(s, (struct sockaddr *)&a, sizeof(a)) < 0)
         goto done;
-    a.sin_port = htons(REPOPORT);
+    a.sin_port = htons(RPORT);
     /* look the host up once: ELKS asks DNS over TCP, and ktcp has room for
      * only a few connections at a time, closed ones included for a while */
-    if (!ip)
-        ip = resolve(REPOHOST);
-    if (!(a.sin_addr.s_addr = ip)
+    if (!RIP)
+        RIP = resolve(RHOST);
+    if (!(a.sin_addr.s_addr = RIP)
             || in_connect(s, (struct sockaddr *)&a, sizeof(a), 10) < 0)
         goto done;
     why = "connection lost";
     strcpy(buf, "GET ");
+#ifdef TINY
     strcat(buf, rpath);
     strcat(buf, " HTTP/1.0\r\nHost: " REPOHOST "\r\nUser-Agent: ept-tiny\r\nConnection: close\r\n\r\n");
+#else
+    strcat(buf, base);
+    strcat(buf, rpath);
+    strcat(buf, " HTTP/1.0\r\nHost: ");
+    strncat(buf, repos[repo] + 7, base - (repos[repo] + 7));    /* host[:port] as written */
+    strcat(buf, "\r\nUser-Agent: ept/" VERSION "\r\nConnection: close\r\n\r\n");
+#endif
     n = strlen(buf);
     if (write(s, buf, n) != n)
         goto done;
@@ -307,6 +394,12 @@ static int get(const char *rpath, int fd, long size, const char *sum)
             continue;
         if (slen < sizeof(status) || strncmp(status, "HTTP/1.", 7) || strncmp(status + 9, "200", 3)) {
             why = "server error";
+#ifndef TINY
+            if (!strncmp(status + 9, "404", 3)) {
+                why = "not found";
+                notfound = 1;
+            }
+#endif
             goto done;
         }
         n -= i;
@@ -315,6 +408,8 @@ static int get(const char *rpath, int fd, long size, const char *sum)
             goto done;
         }
         md5_add(buf + i, n);
+        if (sum && (total ^ (total + n)) >> 12)
+            out(".");                   /* a heartbeat per 4K */
         total += n;
     }
     if (n >= 0 && !hdr && (size < 0 || total == size)) {
@@ -379,10 +474,25 @@ static int fetch(const char *rpath, const char *file, long size, const char *sum
         }
         if (rc == 0)
             return 0;
+#ifndef TINY
+        if (notfound)                   /* trying again will not change that */
+            break;
+#endif
         if (try == TRIES)
             break;
+#ifndef TINY
+        {   /* give ktcp a moment: closed connections hold its memory for a while */
+            struct timeval tv;
+            tv.tv_sec = 5;
+            tv.tv_usec = 0;
+            select(0, NULL, NULL, NULL, &tv);
+        }
+#endif
         say("retrying", "");
     }
+#ifndef TINY
+    if (!(notfound && quiet))
+#endif
     say(why, "");
     unlink(file);
     return -1;
@@ -398,6 +508,7 @@ static void checkline(char *s)
     last = !strcmp(s, "#end");
 }
 
+#ifdef TINY
 static int update(void)
 {
     mkdir(DIR, 0755);
@@ -414,6 +525,136 @@ static int update(void)
     }
     return 0;
 }
+#else
+/* ---- repositories */
+
+/* use repository i: its host, port and path prefix, and its package list for
+ * the channel (index, index.1, ... or nindex, nindex.1, ...) */
+static void setrepo(int i)
+{
+    char *u = repos[i] + 7, *p;
+
+    repo = i;
+    for (p = u; *p != ':' && *p != '/' && *p; p++)
+        ;
+    memcpy(host, u, p - u);
+    host[p - u] = '\0';
+    port = 80;
+    if (*p == ':')
+        for (port = atoun(++p, 10); *p >= '0' && *p <= '9'; p++)
+            ;
+    base = p;
+    strcpy(idxname, *chan ? NINDEX : INDEX);
+    if (i) {
+        strcat(idxname, ".");
+        strcat(idxname, num(i));
+    }
+    idx = idxname;
+}
+
+/* a REPO=http://host[:port][/path] line of the config */
+static void cfgline(char *s)
+{
+    char *p, *u;
+    unsigned n;
+
+    if (strncmp(s, "REPO=", 5))
+        return;
+    s += 5;
+    if (strncmp(s, "http://", 7) || strlen(s) >= URLSZ || nrepo == MAXREPO)
+        goto bad;
+    for (p = u = s + 7; *p != ':' && *p != '/' && *p; p++)
+        ;
+    n = p - u;
+    if (*p == ':') {
+        if (!atoun(p + 1, 10))
+            goto bad;                   /* no port, or 0 */
+        while (*++p >= '0' && *p <= '9')
+            ;
+    }
+    if (!n || n >= sizeof(host) || (*p && *p != '/'))
+        goto bad;
+    for (u = p + strlen(p); u > p && u[-1] == '/'; )
+        *--u = '\0';                   /* no trailing slash */
+    strcpy(repos[nrepo++], s);
+    return;
+bad:
+    say("bad repository in " CONFIG ": ", s);
+    exit(1);
+}
+
+/* the repositories of the config; without a config, write the full ept's */
+static void readcfg(void)
+{
+    static const char cfg[] =
+        "# /etc/ept.cfg - ept repositories, one REPO= line each.\n"
+        "#\n"
+        "# WARNING: every repository listed here can install and replace\n"
+        "# files anywhere on this system. Only add repositories you trust.\n"
+        "#\n"
+        "# The FIRST repository is the primary: it is the only one that can\n"
+        "# update ept itself. Add extra repositories BELOW it; for any other\n"
+        "# package, a later line overrides an earlier one.\n"
+        "\n"
+        "REPO=" DEFREPO "\n";
+    int fd;
+
+    if (eachline(CONFIG, cfgline) < 0
+            && (fd = open(CONFIG, O_WRONLY | O_CREAT | O_EXCL, 0644)) >= 0) {
+        write(fd, cfg, sizeof(cfg) - 1);
+        close(fd);
+    }
+    if (!nrepo)
+        strcpy(repos[nrepo++], DEFREPO);
+}
+
+/* fetch the package list of the repository in use */
+static int fetchlist(void)
+{
+    out("Fetching http://");
+    out(repos[repo] + 7);
+    out(chan);
+    out("/index\n");
+    strcpy(rpath, chan);
+    strcat(rpath, "/index");
+    if (fetch(rpath, INDEXNEW, -1, NULL) != 0)
+        return -1;
+    lines = known = last = 0;
+    eachline(INDEXNEW, checkline);
+    if (!known || !last) {              /* a newer format, or cut short */
+        say("unusable package list from ", repos[repo]);
+        unlink(INDEXNEW);
+        return -1;
+    }
+    return replace(INDEXNEW, idx);
+}
+
+/* fetch every repository's package list. One that fails is left out, except
+ * that ept list makes do with the one saved last time */
+static int update(void)
+{
+    int i, none = 0;
+
+    mkdir(DIR, 0755);
+    quiet = *chan;                      /* a repository need not have nightly builds */
+    for (i = 0; i < nrepo; i++) {
+        setrepo(i);
+        if (fetchlist() == 0)
+            live |= 1 << i;
+        else if (quiet && notfound)
+            none++;
+        else if (listing && access(idx, 0) == 0) {
+            out("Showing the saved package list\n");
+            live |= 1 << i;
+        } else if (nrepo > 1)
+            say("skipping ", repos[i]);
+    }
+    quiet = 0;
+    if (none == nrepo)
+        say("no nightly builds in ", nrepo > 1 ? "any repository" : repos[0]);
+    return live ? 0 : -1;
+}
+#endif
 
 /* a package line of the list, in f[]? */
 static int pkgline(char *s)
@@ -421,10 +662,45 @@ static int pkgline(char *s)
     return s[0] != '#' && split(s) == 6;
 }
 
+#ifndef TINY
+static int has;
+
+static void hasline(char *s)
+{
+    if (pkgline(s) && !strcmp(f[0], pkg))
+        has = 1;
+}
+
+/* use the repository that provides name: the last usable one whose list has
+ * it, but ept itself only ever comes from the first. -1 if none has it */
+static int findrepo(char *name)
+{
+    char *save = pkg;
+    int i;
+
+    pkg = name;
+    for (i = strcmp(name, "ept") ? nrepo - 1 : 0; i >= 0; i--) {
+        if (!(live & 1 << i))
+            continue;
+        setrepo(i);
+        has = 0;
+        eachline(idx, hasline);
+        if (has)
+            break;
+    }
+    pkg = save;
+    return i;
+}
+#endif
+
 /* ---- list */
-static char inst[512];          /* installed packages: "name version\0" each */
+static char inst[512];          /* installed packages: " name version" each */
 static char prev[256], avail[256]; /* fields of a line fit */
 static unsigned long total;
+#ifndef TINY
+static char ich;                /* the channel of the last instver() found */
+static int cur, show;           /* the repository listed; its package is shown */
+#endif
 
 static char *instver(const char *name);
 
@@ -432,12 +708,20 @@ static void instline(char *s)
 {
     if (split(s) != 5 || instver(f[0]))
         return;
+#ifdef TINY
     if (strlen(inst) + strlen(f[0]) + strlen(f[1]) + 3 < sizeof(inst)) {
+#else
+    if (strlen(inst) + strlen(f[0]) + strlen(f[1]) + 5 < sizeof(inst)) {
+#endif
         strcat(inst, " ");
         strcat(inst, f[0]);
         strcat(inst, " ");
         strcat(inst, f[1]);
         strcat(inst, " ");
+#ifndef TINY
+        strcat(inst, f[4]);             /* " name version channel " */
+        strcat(inst, " ");
+#endif
     }
 }
 
@@ -455,6 +739,9 @@ static char *instver(const char *name)
             if (e - p < sizeof(v)) {
                 memcpy(v, p, e - p);
                 v[e - p] = '\0';
+#ifndef TINY
+                ich = e[1];
+#endif
                 return v;
             }
         }
@@ -474,6 +761,10 @@ static void showpkg(void)
 
     if (!prev[0])
         return;
+#ifndef TINY
+    if (!show)
+        return;                         /* another repository provides it */
+#endif
     pad(prev, 15);
     pad(avail, 13);
     pad("", 5 - strlen(num((total + 1023) / 1024)));
@@ -481,10 +772,19 @@ static void showpkg(void)
     out("K");
     if ((v = instver(prev)) != NULL) {
         out("  [installed");
+#ifdef TINY
         if (strcmp(v, avail)) {
             out(" ");
             out(v);
         }
+#else
+        if (strcmp(v, avail) || (ich == 'n') != (*chan != 0)) {
+            out(" ");
+            out(v);                     /* another version, or channel */
+            if (ich == 'n')
+                out(" nightly");
+        }
+#endif
         out("]");
     }
     out("\n");
@@ -499,10 +799,16 @@ static void listline(char *s)
         strcpy(prev, f[0]);
         strcpy(avail, f[1]);
         total = 0;
+#ifndef TINY
+        total = atoun(f[3], 10);
+        show = findrepo(prev) == cur;   /* reads other lists: f[] is done with */
+        return;
+#endif
     }
     total += atoun(f[3], 10);
 }
 
+#ifdef TINY
 static int list(void)
 {
     inst[0] = ' ';
@@ -511,6 +817,47 @@ static int list(void)
     showpkg();
     return 0;
 }
+#else
+/* an installed package that no package list has */
+static void goneline(char *s)
+{
+    char *v;
+    int c;
+
+    if (split(s) != 5 || !strcmp(f[0], prev))
+        return;
+    strcpy(prev, f[0]);
+    v = f[1];                           /* findrepo() reuses f[] */
+    c = f[4][0];
+    if (findrepo(prev) >= 0)
+        return;
+    pad(prev, 15);
+    pad("-", 13);
+    pad("", 5);
+    out("-  [installed ");
+    out(v);
+    if (c == 'n')
+        out(" nightly");
+    out("]\n");
+}
+
+static int list(void)
+{
+    inst[0] = ' ';
+    eachline(DB, instline);
+    for (cur = 0; cur < nrepo; cur++) {
+        if (!(live & 1 << cur))
+            continue;
+        setrepo(cur);
+        prev[0] = '\0';
+        eachline(idx, listline);
+        showpkg();
+    }
+    prev[0] = '\0';
+    eachline(DB, goneline);
+    return 0;
+}
+#endif
 
 /* ---- install */
 
@@ -553,13 +900,20 @@ static void fileline(char *s)
         bad = 1;
         return;
     }
+#ifndef TINY
+    if (repo && !strcasecmp(f[5], SELF)) {      /* any case: FAT has only one */
+        say("only the first repository can install ", f[5]);
+        bad = 1;
+        return;
+    }
+#endif
     n = strlen(f[5]) + 1;
     if (nnew + n <= sizeof(newf))
         memcpy(newf + nnew, f[5], n);
     nnew += n;
     out("  ");
     out(f[5]);
-    out("\n");
+    out(" ");
     strcpy(path, ROOT);
     strcat(path, f[5]);
     for (p = path + strlen(ROOT) + 1; *p; p++)  /* create the parent directories */
@@ -580,6 +934,7 @@ static void fileline(char *s)
         return;
     }
     chmod(path, atoun(f[4], 8));
+    out("\n");
 }
 
 /* is d one of the files just installed? (only if they all fitted in newf) */
@@ -599,6 +954,9 @@ static int innew(const char *d)
 static void keepline(char *s)
 {
     char *t = s + strlen(s);
+#ifndef TINY
+    char *line = s;                     /* the reader's own buffer */
+#endif
 
     if (split(s) != 5)
         return;
@@ -688,6 +1046,12 @@ static int ask(void)
 
 static int install(char *name)
 {
+#ifndef TINY
+    if (findrepo(name) < 0) {
+        say("no package named ", name);
+        return 1;
+    }
+#endif
     pkg = name;
     found = bad = nnew = 0;
     eachline(idx, fileline);
@@ -699,8 +1063,10 @@ static int install(char *name)
         return 1;
     if (rewrite(1) != 0)
         return 1;
+#ifdef TINY
     if (!strcmp(name, "ept"))
         out("The full ept is installed; run ept again to use it\n");
+#endif
     return 0;
 }
 
@@ -734,8 +1100,13 @@ int main(int argc, char **argv)
     }
     if (argc < 2 || (strcmp(argv[1], "list") && argc < 3)
             || (strcmp(argv[1], "list") && strcmp(argv[1], "install") && strcmp(argv[1], "remove"))) {
-        out("usage: ept list [-n] | ept install [-n] <pkg> ... | ept remove <pkg> ...\n"
-            "This is tiny ept; \"ept install ept\" installs the full one.\n");
+#ifdef TINY
+        out("usage: ept list [-n] | ept install [-n] <pkgs> | ept remove <pkgs>\n"
+            "This is tinyept; \"ept install ept\" installs the full one.\n");
+#else
+        out("ept " VERSION "\n"
+            "usage: ept list [-n] | ept install [-n] <pkgs> | ept remove <pkgs>\n");
+#endif
         return 1;
     }
     if (argv[1][0] == 'r') {
@@ -743,15 +1114,23 @@ int main(int argc, char **argv)
             rc |= remove_(argv[i]);
         return rc;
     }
+#ifdef TINY
     out("Fetching http://" REPOHOST);
     out(chan);
     out("/index\n");
+#else
+    readcfg();
+    listing = argv[1][0] == 'l';
+#endif
     if (update() != 0)
         return 1;
     if (argv[1][0] == 'l')
         return list();
     for (i = 2; i < argc; i++) {        /* one question for all the packages */
         pkg = argv[i];
+#ifndef TINY
+        if (findrepo(pkg) >= 0)
+#endif
         eachline(idx, sizeline);
     }
     if (total && !ask())

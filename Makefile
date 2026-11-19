@@ -20,8 +20,10 @@ tiny/tinyept: tiny/tinyept.c
 # eptdev.c: the next full ept, built up from tiny ept; EPTDEVFLAGS=-DTINY
 # builds it as tiny ept
 EPTDEVFLAGS =
+# the full one nests its line reader, so it needs more stack than tiny ept
+EPTDEVSTACK = $(if $(findstring -DTINY,$(EPTDEVFLAGS)),2048,4096)
 eptdev: eptdev.c
-	$(CC) $(CFLAGS) -mregparmcall $(TINYFLAGS) $(EPTDEVFLAGS) -maout-heap=256 -maout-stack=2048 -o $@ eptdev.c
+	$(CC) $(CFLAGS) -mregparmcall $(TINYFLAGS) $(EPTDEVFLAGS) -maout-heap=256 -maout-stack=$(EPTDEVSTACK) -o $@ eptdev.c
 
 clean:
 	rm -f ept tiny/tinyept eptdev
