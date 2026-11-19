@@ -25,7 +25,7 @@ A new version of a package only downloads the files that changed. `ept` goes by 
 ### On ELKS
 
 - Build: `make` (needs `ia16-elf-gcc` with the ELKS libc), then copy `ept` to `/bin/ept`.
-- Repository: defaults to `http://ept.samwarr.dev`. To use others, put `REPO=http://host[:port][/path]` lines in `/etc/ept.cfg`; see [Repositories](#repositories).
+- Repository: defaults to `http://ept-repo.com` (`http://ept.samwarr.dev` before 1.10, still served). To use others, put `REPO=http://host[:port][/path]` lines in `/etc/ept.cfg`; see [Repositories](#repositories).
 - State: `/etc/ept/index` and `/etc/ept/nindex` are the package lists (`index.1`, `nindex.1` and so on for extra repositories), `/etc/ept/inst` records what is installed.
 - Networking must be up first (`net start`).
 
@@ -33,7 +33,7 @@ Every download is checked against the size and MD5 in the package list before it
 
 ### Repositories
 
-Every `REPO=` line in `/etc/ept.cfg` is a repository, up to 8 of them; if the file does not exist, `ept` creates it with the contents of [`ept.cfg`](ept.cfg) the first time it runs a command (`ept` on its own only prints the usage). Without a `REPO=` line in it, `http://ept.samwarr.dev` is used.
+Every `REPO=` line in `/etc/ept.cfg` is a repository, up to 8 of them; if the file does not exist, `ept` creates it with the contents of [`ept.cfg`](ept.cfg) the first time it runs a command (`ept` on its own only prints the usage). Without a `REPO=` line in it, `http://ept-repo.com` is used.
 
 **Every repository you list can install and replace files anywhere on the system, so only add ones you trust.**
 
@@ -72,7 +72,7 @@ A package is refused, and the old one left as it was, if it has files that canno
 
 `eptrepo index` builds the list from whatever is in `pool/`, so a package can also be maintained by hand: copy the files to `pool/<name>/`, write `pool/<name>/VERSION` (and `DESC` if you like), and run `eptrepo index <repo>`.
 
-`eptrepo html` writes `<repo>/index.html`, the home page a browser gets at `/`: how to get started, the commands, and every package with its release and nightly versions. It is plain HTML that old browsers like ELKSWeb can show. The builder rewrites it after every build cycle; set `EPT_URL` to the address people should use for the repository (default `http://ept.samwarr.dev`).
+`eptrepo html` writes `<repo>/index.html`, the home page a browser gets at `/`: how to get started, the commands, and every package with its release and nightly versions. It is plain HTML that old browsers like ELKSWeb can show. The builder rewrites it after every build cycle; set `EPT_URL` to the address people should use for the repository (default `http://ept-repo.com`).
 
 ### License
 

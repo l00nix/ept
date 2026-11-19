@@ -38,7 +38,7 @@
 
 #define VERSION     "1.10"
 #define SELF        "/bin/ept"
-#define DEFREPO     "http://ept.samwarr.dev"
+#define DEFREPO     "http://ept-repo.com"
 #define CONFIG      "/etc/ept.cfg"
 #define DIR         "/etc/ept"
 #define INDEX       DIR "/index"
