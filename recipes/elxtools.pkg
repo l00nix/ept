@@ -1,0 +1,11 @@
+# HP 200LX firmware tools only; Cmdr and scrcap are separate packages.
+DESC="HP 200LX battery, status and hardware-control tools"
+GIT=https://github.com/l00nix/HP-200LX-elx-suite.git
+BUILD='ELKS="$ELKS" sh build.sh'
+FILES="build/elxstat:/bin/elxstat
+build/elxbat:/bin/elxbat
+build/elxctl:/bin/elxctl
+build/elxdash:/bin/elxdash
+LICENSE:/lib/elxtools/copying
+docs/FONT-LICENSE:/lib/elxtools/font.lic
+USAGE.TXT:/lib/elxtools/usage.txt"
