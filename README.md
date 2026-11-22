@@ -57,7 +57,7 @@ It works like the full ept, except:
 
 ### On ELKS
 
-- Build: `make eptdev` for the full ept or `make tiny/tinyept` for tiny ept, then copy the result to `/bin/ept`. Both need `ia16-elf-gcc` with the ELKS libc, including its regparmcall variant (`-mregparmcall`), which the ELKS libc build makes. With an ELKS libc from before `in_resolv()` took three arguments, add `TINYFLAGS=-DOLD_RESOLV`. Plain `make` still builds the 1.x `ept` from `ept.c`.
+- Build: `make` for the full ept or `make tinyept` for tiny ept, then copy the result to `/bin/ept`. Both come from `ept.c`; tiny ept is the same source built with `-DTINY`. Both need `ia16-elf-gcc` with the ELKS libc, including its regparmcall variant (`-mregparmcall`), which the ELKS libc build makes. With an ELKS libc from before `in_resolv()` took three arguments, add `TINYFLAGS=-DOLD_RESOLV`.
 - Repository: defaults to `http://ept-repo.com` (`http://ept.samwarr.dev` before 1.10, still served). To use others, put `REPO=http://host[:port][/path]` lines in `/etc/ept.cfg`, where host is a name (looked up with DNS) or an IP address; see [Repositories](#repositories).
 - State: `/etc/ept/index` and `/etc/ept/nindex` are the package lists (`index.1`, `nindex.1` and so on for extra repositories), `/etc/ept/inst` records what is installed.
 - Networking must be up first (`net start`).
@@ -109,4 +109,4 @@ A package is refused, and the old one left as it was, if it has files that canno
 
 ### License
 
-MIT, see [LICENSE](LICENSE). `md5.c` is public domain.
+MIT, see [LICENSE](LICENSE).
