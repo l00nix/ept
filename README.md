@@ -43,7 +43,7 @@ ept remove <pkgs>        remove packages
 
 Tiny ept is the full ept cut down to fit a floppy. It is under 7,168 bytes, so it takes 7 blocks on a MINIX floppy.
 
-- `ept install -n tinyept` replaces the full ept with tiny ept (tiny ept is only built as a nightly for now). Run the same command once more with tiny ept to tidy the installed list: it then records `/bin/ept` as tinyept's instead of ept's.
+- `ept install tinyept` replaces the full ept with tiny ept. Run the same command once more with tiny ept to tidy the installed list: it then records `/bin/ept` as tinyept's instead of ept's.
 - `ept install ept` brings the full ept back.
 
 It works like the full ept, except:
