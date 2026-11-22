@@ -1,4 +1,4 @@
-# ept itself so that `ept upgrade` can update the package tool
+# ept itself, so that `ept update` keeps the package tool current
 DESC="ELKS Package Tool, this package manager"
 GIT=https://github.com/sammothxc/ept.git
 BUILD="make"

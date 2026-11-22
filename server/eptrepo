@@ -293,41 +293,38 @@ EOF
 	if [ "$url" = http://ept-repo.com ]; then
 		cat <<EOF
 <p>With networking running (<tt>net start</tt>):</p>
-<pre>ept update
-ept list</pre>
+<pre>ept list</pre>
 EOF
 	else
 		cat <<EOF
 <p>Make this the first <tt>REPO=</tt> line of <tt>/etc/ept.cfg</tt>, then with
 networking running (<tt>net start</tt>):</p>
 <pre>REPO=$url</pre>
-<pre>ept update
-ept list</pre>
+<pre>ept list</pre>
 EOF
 	fi
 	if [ "$hasept" ]; then
 		cat <<EOF
-<p>If your ELKS does not have ept yet, download it first. <tt>ept install -r ept</tt>
-then checks <tt>/bin/ept</tt> against the package list and records it as installed,
-so <tt>ept upgrade</tt> keeps it current:</p>
+<p>If your ELKS does not have ept yet, download it first. <tt>ept install ept</tt>
+then records it as installed, so <tt>ept update</tt> keeps it current:</p>
 <pre>urlget $url/pool/ept/bin/ept &gt; /bin/ept
 chmod 755 /bin/ept
-ept install -r ept</pre>
+ept install ept</pre>
 EOF
 	fi
 	cat <<'EOF'
 
 <h2>Using ept</h2>
-<pre>ept update                       fetch the package lists
-ept list [-n]                    show available and installed packages
+<pre>ept list [-n]                    show available and installed packages
 ept search [-n] [&lt;text&gt;]         find packages by name or description
-ept install [-n] [-r] &lt;pkg&gt; ...  install or repair packages
-ept upgrade [-y]                 update all installed packages
+ept install [-n] [-r] &lt;pkg&gt; ...  install or update packages
+ept update                       update everything installed
 ept remove &lt;pkg&gt; ...             remove packages</pre>
 <p><tt>-n</tt> uses nightly builds of the latest code instead of releases. A package
 installed with <tt>-n</tt> stays on nightlies until it is installed again without it.
-<tt>-r</tt> checks every file of a package on disk and fetches the ones that differ.
-<tt>-y</tt> skips the question before installing or upgrading.</p>
+<tt>-r</tt> fetches every file of the packages again, changed or not.
+<tt>install</tt> and <tt>update</tt> ask before downloading; scripts answer by piping:
+<tt>echo | ept update</tt>.</p>
 
 <h2>Packages</h2>
 EOF
