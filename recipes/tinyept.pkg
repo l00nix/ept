@@ -3,5 +3,3 @@ DESC="Tiny ept for floppy systems; replaces /bin/ept, ept install ept brings the
 GIT=https://github.com/sammothxc/ept.git
 BUILD="make tinyept"
 FILES="tinyept:/bin/ept"
-# nightlies only until an ept release tag has the tinyept target (v1.10 does not)
-STABLE=no
