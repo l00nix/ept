@@ -2,21 +2,20 @@
 DESC="Graphical web browser and Nano-X client"
 GIT=https://github.com/l00nix/ELKSWeb.git
 BRANCH=main
-STABLE_TAG=v0.6
+STABLE_TAG=v0.7
 # Pin the exact client subset tested with this release; no Nano-X server is built.
 BUILD="set -e
 mkdir -p build/ept-deps
 curl -fL https://github.com/l00nix/ELKSWeb/releases/download/v0.6/Microwindows-client-source.tar.gz -o build/ept-deps/client.tar.gz
 echo 'c56af8127e1abbc5fb4518f8a0995f681ec23e5df018d8e602e2d78b492a5dd1  build/ept-deps/client.tar.gz' | sha256sum -c -
 tar xzf build/ept-deps/client.tar.gz -C build/ept-deps
-ELKSWEB_ELKS=$ELKS sh toolchain/build-external.sh
-ELKSWEB_ELKS=$ELKS MWDIR=build/ept-deps/microwindows-client sh toolchain/build-nanox.sh
+ELKSWEB_ELKS=$ELKS MWDIR=build/ept-deps/microwindows-client sh toolchain/build-external.sh
 sh toolchain/stage-web-data.sh build/ept-root
 cp share/license.txt build/ept-root/lib/web/license.txt
 cat build/ept-deps/microwindows-client/LICENSE >> build/ept-root/lib/web/license.txt
 cp share/logo-source.txt build/ept-root/lib/web/logo-src.txt
 cp docs/NANOX-EXPERIMENT.md build/ept-root/lib/web/nanox.txt
-cp docs/RELEASE-0.6.md build/ept-root/lib/web/readme.txt"
+cp docs/RELEASE-0.7.md build/ept-root/lib/web/readme.txt"
 FILES="build/elksweb:/bin/elksweb
 build/nanox/webnx:/bin/webnx
 build/ept-root/lib:/lib"
